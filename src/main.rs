@@ -11,7 +11,11 @@ mod game;
 mod geometry;
 
 fn main() {
-    let map = game::get_default_map();
+    let map = match game::get_default_map() {
+        Ok(map) => map,
+        Err(e) => panic!("Can't open default map: {}", e),
+    };
+
     let game = game::start_game(map);
 
     println!("Game started: {:#?}", game);

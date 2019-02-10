@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::fs;
 
 use crate::geometry;
@@ -34,11 +35,15 @@ pub struct ActiveGame {
     pub started_time: u32,
 }
 
-pub fn get_default_map() -> map::GameMap {
-    let map_data = fs::read_to_string(DEFAULT_MAP).expect("Unable to read file");
+pub fn get_default_map() -> Result<map::GameMap, Box<dyn Error>> {
+    // JSON is probably woefully inadequate for representing this map,
+    // I will probably want to use some sort of more packed binary format,
+    // maybe with an accompanying human-readable JSON config for top-level
+    // map configurations.
+    let map_data = fs::read_to_string(DEFAULT_MAP)?;
 
-    let map = serde_json::from_str(&map_data).expect("JSON was not well-formatted");
-    map
+    let map_struct = serde_json::from_str(&map_data)?;
+    Ok(map_struct)
 }
 
 pub fn start_game(map: map::GameMap) -> ActiveGame {
