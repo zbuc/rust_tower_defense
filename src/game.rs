@@ -10,8 +10,6 @@ use crate::bincode::{deserialize, serialize};
 pub mod entities;
 pub mod map;
 
-const DEFAULT_MAP: &str = "data/map.bin";
-
 #[derive(Debug)]
 enum GameMessage {
     Interact {
@@ -42,11 +40,11 @@ pub struct ActiveGame {
 pub fn recreate_default_map() -> Result<map::GameMap, Box<dyn Error>> {
     println!("Recreating default map");
 
-    let mut file = File::create(DEFAULT_MAP)?;
+    let mut file = File::create(map::DEFAULT_MAP)?;
 
     let map_struct = map::GameMap {
-        dimensions: geometry::BoundingBox(geometry::Point(0, 0), geometry::Point(100, 100)),
-        name: "Default Map".to_string(),
+        dimensions: map::DEFAULT_MAP_DIMENSIONS,
+        name: map::DEFAULT_MAP.to_string(),
     };
 
     let encoded: Vec<u8> = serialize(&map_struct).unwrap();
@@ -58,7 +56,7 @@ pub fn recreate_default_map() -> Result<map::GameMap, Box<dyn Error>> {
 pub fn get_default_map() -> Result<map::GameMap, Box<dyn Error>> {
     // I will probably want to use some human-readable JSON config for top-level
     // map configurations.
-    let mut map_file = match File::open(DEFAULT_MAP) {
+    let mut map_file = match File::open(map::DEFAULT_MAP) {
         Ok(f) => f,
         Err(_error) => return recreate_default_map(),
     };
