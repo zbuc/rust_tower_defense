@@ -10,7 +10,7 @@ use crate::bincode::{deserialize, serialize};
 pub mod entities;
 pub mod map;
 
-const DEFAULT_MAP: &str = "data/map.json";
+const DEFAULT_MAP: &str = "data/map.bin";
 
 #[derive(Debug)]
 enum GameMessage {
