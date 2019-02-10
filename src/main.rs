@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate serde;
+extern crate bincode;
 extern crate serde_derive;
 extern crate serde_json;
 

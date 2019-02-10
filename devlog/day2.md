@@ -14,3 +14,5 @@ Split code into separate modules. Pretty sure the structs and functions right no
 but you gotta start somewhere.
 
 Got JSON map loading working. The way import visibility works in Rust is difficult to get my head around as a beginner.
+
+Learned error handling, kinda. This is also difficult to wrap my head around. The book keeps showing more efficient macros for doing things, but the macro syntax is a little weird and mysterious to me still.
