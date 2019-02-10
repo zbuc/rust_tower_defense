@@ -1,5 +1,5 @@
 use crate::geometry;
-use crate::serde_derive::{Serialize, Deserialize};
+use crate::serde_derive::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GameMap {

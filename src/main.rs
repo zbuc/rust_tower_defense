@@ -1,14 +1,14 @@
 #[macro_use]
 extern crate serde;
-extern crate serde_json;
 extern crate serde_derive;
+extern crate serde_json;
 
-use std::io;
-use std::cmp::Ordering;
 use rand::Rng;
+use std::cmp::Ordering;
+use std::io;
 
-mod geometry;
 mod game;
+mod geometry;
 
 fn main() {
     let map = game::get_default_map();
@@ -29,7 +29,8 @@ fn main() {
 
         let mut guess = String::new();
 
-        io::stdin().read_line(&mut guess)
+        io::stdin()
+            .read_line(&mut guess)
             .expect("Failed to read line");
 
         let guess: u8 = match guess.trim().parse() {

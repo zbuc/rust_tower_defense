@@ -12,3 +12,5 @@ On to Chapter 9 of the book. Itching to write unit tests.
 
 Split code into separate modules. Pretty sure the structs and functions right now will all be useless for the final product,
 but you gotta start somewhere.
+
+Got JSON map loading working. The way import visibility works in Rust is difficult to get my head around as a beginner.
