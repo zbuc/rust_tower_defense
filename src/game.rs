@@ -60,14 +60,14 @@ pub fn get_default_map() -> Result<map::GameMap, Box<dyn Error>> {
     // map configurations.
     let mut map_file = match File::open(DEFAULT_MAP) {
         Ok(f) => f,
-        Err(error) => return recreate_default_map(),
+        Err(_error) => return recreate_default_map(),
     };
     let mut map_data = Vec::<u8>::new();
     map_file.read_to_end(&mut map_data)?;
 
     match deserialize(&map_data) {
         Ok(map_struct) => Ok(map_struct),
-        Err(error) => recreate_default_map(),
+        Err(_error) => recreate_default_map(),
     }
 }
 
