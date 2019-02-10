@@ -5,6 +5,8 @@ use crate::geometry;
 pub mod entities;
 pub mod map;
 
+const DEFAULT_MAP: &str = "data/map.json";
+
 #[derive(Debug)]
 enum GameMessage {
     Interact {
@@ -33,7 +35,7 @@ pub struct ActiveGame {
 }
 
 pub fn get_default_map() -> map::GameMap {
-    let map_data = fs::read_to_string("data/map.json").expect("Unable to read file");
+    let map_data = fs::read_to_string(DEFAULT_MAP).expect("Unable to read file");
 
     let map = serde_json::from_str(&map_data).expect("JSON was not well-formatted");
     map
