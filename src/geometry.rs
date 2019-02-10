@@ -1,7 +1,9 @@
-#[derive(Debug)]
+use crate::serde_derive::{Serialize, Deserialize};
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Point(pub u32, pub u32);
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct BoundingBox(pub Point, pub Point);
 
 impl BoundingBox {

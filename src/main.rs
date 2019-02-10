@@ -1,3 +1,8 @@
+#[macro_use]
+extern crate serde;
+extern crate serde_json;
+extern crate serde_derive;
+
 use std::io;
 use std::cmp::Ordering;
 use rand::Rng;

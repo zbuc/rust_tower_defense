@@ -1,18 +1,28 @@
+use std::fs;
+
 use crate::geometry;
 
-pub mod map;
 pub mod entities;
+pub mod map;
 
 #[derive(Debug)]
 enum GameMessage {
-    Interact{source: entities::GameEntity, target: entities::GameEntity},
-    TriggerAbility{target: entities::GameEntity},
-    Move{target: entities::GameEntity, destination: geometry::Point},
+    Interact {
+        source: entities::GameEntity,
+        target: entities::GameEntity,
+    },
+    TriggerAbility {
+        target: entities::GameEntity,
+    },
+    Move {
+        target: entities::GameEntity,
+        destination: geometry::Point,
+    },
 }
 
 #[derive(Debug)]
 pub struct GameState {
-//    entities: 
+    entities: Vec<entities::GameEntity>,
 }
 
 #[derive(Debug)]
@@ -23,20 +33,17 @@ pub struct ActiveGame {
 }
 
 pub fn get_default_map() -> map::GameMap {
-    map::GameMap {
-        name: String::from("Test"),
-        dimensions: geometry::BoundingBox (
-            geometry::Point(0,0),
-            geometry::Point(100,100)
-        )
-    }
+    let map_data = fs::read_to_string("data/map.json").expect("Unable to read file");
+
+    let map = serde_json::from_str(&map_data).expect("JSON was not well-formatted");
+    map
 }
 
 pub fn start_game(map: map::GameMap) -> ActiveGame {
     ActiveGame {
         map: map,
         state: GameState {
-            
+            entities: Vec::new(),
         },
         started_time: 0,
     }
