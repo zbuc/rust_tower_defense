@@ -1,6 +1,6 @@
-use crate::geometry;
+use crate::geometry::{self, Location};
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum GameEntityType {
     Player,
     Enemy,
@@ -21,10 +21,6 @@ impl Location for GameEntity {
     }
 }
 
-pub trait Location {
-    fn get_center_point(&self) -> geometry::Point;
-}
-
 impl GameEntity {
     fn can_take_damage(&self) -> bool {
         match self.entity_type {
@@ -34,5 +30,19 @@ impl GameEntity {
             GameEntityType::Zone => false,
             GameEntityType::Projectile => false,
         }
+    }
+}
+
+pub struct Zone {
+    bounding_box: geometry::BoundingBox,
+}
+
+impl Zone {
+    pub fn entity_inside<'a>(&self, entity: &'a GameEntity) -> bool {
+        false
+    }
+
+    pub fn get_bounding_box(&self) -> geometry::BoundingBox {
+        self.bounding_box
     }
 }
