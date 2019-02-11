@@ -48,7 +48,7 @@ pub fn recreate_default_map() -> Result<map::GameMap, Box<dyn Error>> {
     };
 
     let encoded: Vec<u8> = serialize(&map_struct).unwrap();
-    file.write(&encoded)?;
+    file.write_all(&encoded)?;
 
     Ok(map_struct)
 }

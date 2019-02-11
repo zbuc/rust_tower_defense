@@ -18,3 +18,9 @@ Got JSON map loading working. The way import visibility works in Rust is difficu
 Learned error handling, kinda. This is also difficult to wrap my head around. The book keeps showing more efficient macros for doing things, but the macro syntax is a little weird and mysterious to me still.
 
 Changed map handling to binary serialization based on bincode, which looks like a reasonable choice. They say it's guaranteed to be compressed at least somewhat from the in-memory representation, works for me.
+
+```rust
+pub struct Point(pub u32, pub u32);
+```
+
+I want to make those internal members non-public but can't figure out how to get the `new` method to work in a constant.

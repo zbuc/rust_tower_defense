@@ -1,9 +1,13 @@
 use crate::serde_derive::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Point(pub u32, pub u32);
+pub struct Point(u32, u32);
 
 impl Point {
+    pub const fn new(x: u32, y: u32) -> Point {
+        Point(x, y)
+    }
+
     pub fn x(&self) -> &u32 {
         &self.0
     }
@@ -14,11 +18,15 @@ impl Point {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct BoundingBox(pub Point, pub Point);
+pub struct BoundingBox(Point, Point);
+
+pub trait Polygon<T> {
+    fn area(&self) -> T;
+}
 
 impl BoundingBox {
-    pub fn area(&self) -> u32 {
-        (self.upper_right().x() - self.lower_left().x()) * (self.upper_right().y() - self.lower_left().y())
+    pub const fn new(ll: Point, ur: Point) -> BoundingBox {
+        BoundingBox(ll, ur)
     }
 
     pub fn lower_left(&self) -> &Point {
@@ -27,5 +35,11 @@ impl BoundingBox {
 
     pub fn upper_right(&self) -> &Point {
         &self.1
+    }
+}
+
+impl Polygon<u32> for BoundingBox {
+    fn area(&self) -> u32 {
+        (self.upper_right().x() - self.lower_left().x()) * (self.upper_right().y() - self.lower_left().y())
     }
 }

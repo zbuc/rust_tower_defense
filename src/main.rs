@@ -1,3 +1,5 @@
+#![deny(clippy::all)]
+
 #[macro_use]
 extern crate serde;
 extern crate bincode;
@@ -10,6 +12,8 @@ use std::io;
 
 mod game;
 mod geometry;
+
+use geometry::Polygon;
 
 fn main() {
     let map = match game::get_default_map() {
