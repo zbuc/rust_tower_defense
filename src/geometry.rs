@@ -1,6 +1,6 @@
 use crate::serde_derive::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 pub struct Point(u32, u32);
 
 impl Point {
@@ -17,7 +17,7 @@ impl Point {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 pub struct BoundingBox(Point, Point);
 
 pub trait Polygon<T> {

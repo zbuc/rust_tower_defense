@@ -15,6 +15,16 @@ pub struct GameEntity {
     pub entity_type: GameEntityType,
 }
 
+impl Location for GameEntity {
+    fn get_center_point(&self) -> geometry::Point {
+        self.location
+    }
+}
+
+pub trait Location {
+    fn get_center_point(&self) -> geometry::Point;
+}
+
 impl GameEntity {
     fn can_take_damage(&self) -> bool {
         match self.entity_type {
