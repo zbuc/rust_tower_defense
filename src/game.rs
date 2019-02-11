@@ -71,7 +71,7 @@ pub fn get_default_map() -> Result<map::GameMap, Box<dyn Error>> {
 
 pub fn start_game(map: map::GameMap) -> ActiveGame {
     ActiveGame {
-        map: map,
+        map,
         state: GameState {
             entities: Vec::new(),
         },
