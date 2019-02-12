@@ -39,7 +39,7 @@ pub struct Zone {
 
 impl Zone {
     pub fn entity_inside<'a>(&self, entity: &'a GameEntity) -> bool {
-        false
+        entity.location.inside(self.get_bounding_box())
     }
 
     pub fn get_bounding_box(&self) -> geometry::BoundingBox {

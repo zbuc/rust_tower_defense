@@ -1,5 +1,44 @@
 use crate::serde_derive::{Deserialize, Serialize};
 
+#[cfg(test)]
+mod tests {
+    use crate::geometry::{Point, BoundingBox, Polygon};
+
+    #[test]
+    fn point_tests() {
+        let p = Point(0,0);
+        let p2 = Point(2, 0);
+
+        assert!(p.left_of(p2));
+        assert!(!p.right_of(p2));
+        assert!(!p2.left_of(p));
+        assert!(p2.right_of(p));
+
+        let p3 = Point(0, 2);
+
+        assert!(p3.above(p));
+        assert!(p.below(p3));
+
+        let p4 = Point(2, 2);
+
+        let bb1 = BoundingBox::new(p, p4);
+
+        // point on the edge is not considered inside
+        assert!(!p2.inside(bb1));
+        assert!(!bb1.contains(p2));
+
+        let p5 = Point(1, 1);
+
+        assert!(p5.inside(bb1));
+        assert!(bb1.contains(p5));
+
+        let p6 = Point(50, 50);
+
+        assert!(!bb1.contains(p6));
+        assert!(!p6.inside(bb1));
+    }
+}
+
 #[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 pub struct Point(u32, u32);
 
