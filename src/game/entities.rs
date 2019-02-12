@@ -46,3 +46,23 @@ impl Zone {
         self.bounding_box
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::game::entities::*;
+    use crate::geometry::{Point, BoundingBox};
+
+    #[test]
+    fn entities_tests() {
+        let player = GameEntity{
+            location: Point::new(5, 5),
+            entity_type: GameEntityType::Player,
+        };
+
+        let zone = Zone{
+            bounding_box: BoundingBox::new(Point::new(0, 0), Point::new(10, 10)),
+        };
+
+        assert!(zone.entity_inside(&player));
+    }
+}
