@@ -2,11 +2,11 @@ use crate::serde_derive::{Deserialize, Serialize};
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{Point, BoundingBox, Polygon};
+    use crate::geometry::{BoundingBox, Point, Polygon};
 
     #[test]
     fn point_tests() {
-        let p = Point(0,0);
+        let p = Point(0, 0);
         let p2 = Point(2, 0);
 
         assert!(p.left_of(p2));
@@ -18,24 +18,6 @@ mod tests {
 
         assert!(p3.above(p));
         assert!(p.below(p3));
-
-        let p4 = Point(2, 2);
-
-        let bb1 = BoundingBox::new(p, p4);
-
-        // point on the edge is not considered inside
-        assert!(!p2.inside(bb1));
-        assert!(!bb1.contains(p2));
-
-        let p5 = Point(1, 1);
-
-        assert!(p5.inside(bb1));
-        assert!(bb1.contains(p5));
-
-        let p6 = Point(50, 50);
-
-        assert!(!bb1.contains(p6));
-        assert!(!p6.inside(bb1));
     }
 }
 
@@ -104,10 +86,14 @@ impl BoundingBox {
 
 impl Polygon<u32> for BoundingBox {
     fn area(&self) -> u32 {
-        (self.upper_right().x() - self.lower_left().x()) * (self.upper_right().y() - self.lower_left().y())
+        (self.upper_right().x() - self.lower_left().x())
+            * (self.upper_right().y() - self.lower_left().y())
     }
 
     fn contains(&self, point: Point) -> bool {
-        point.above(self.lower_left()) && point.right_of(self.lower_left()) && point.below(self.upper_right()) && point.left_of(self.upper_right())
+        point.above(self.lower_left())
+            && point.right_of(self.lower_left())
+            && point.below(self.upper_right())
+            && point.left_of(self.upper_right())
     }
 }

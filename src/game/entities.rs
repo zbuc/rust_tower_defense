@@ -1,5 +1,7 @@
 use crate::geometry::{self, Location};
 
+// Design decision: avoid embedding methods within entities --
+// we will go with a very poor version of ECS pattern (entity component system)
 #[derive(Debug, Copy, Clone)]
 pub enum GameEntityType {
     Player,
@@ -50,16 +52,16 @@ impl Zone {
 #[cfg(test)]
 mod tests {
     use crate::game::entities::*;
-    use crate::geometry::{Point, BoundingBox};
+    use crate::geometry::{BoundingBox, Point};
 
     #[test]
     fn entities_tests() {
-        let player = GameEntity{
+        let player = GameEntity {
             location: Point::new(5, 5),
             entity_type: GameEntityType::Player,
         };
 
-        let zone = Zone{
+        let zone = Zone {
             bounding_box: BoundingBox::new(Point::new(0, 0), Point::new(10, 10)),
         };
 

@@ -1,50 +1,51 @@
+pub mod entities;
+pub mod map;
+
 use std::error::Error;
 use std::fs::{self, File};
 use std::io::Read;
 use std::io::Write;
 
-use crate::geometry;
-
+use super::geometry::Point;
 use crate::bincode::{deserialize, serialize};
-
-pub mod entities;
-pub mod map;
+use entities::GameEntity;
+use map::{GameMap, DEFAULT_MAP, DEFAULT_MAP_DIMENSIONS, DEFAULT_MAP_NAME};
 
 #[derive(Debug)]
 enum GameMessage {
     Interact {
-        source: entities::GameEntity,
-        target: entities::GameEntity,
+        source: GameEntity,
+        target: GameEntity,
     },
     TriggerAbility {
-        target: entities::GameEntity,
+        target: GameEntity,
     },
     Move {
-        target: entities::GameEntity,
-        destination: geometry::Point,
+        target: GameEntity,
+        destination: Point,
     },
 }
 
 #[derive(Debug)]
 pub struct GameState {
-    entities: Vec<entities::GameEntity>,
+    entities: Vec<GameEntity>,
 }
 
 #[derive(Debug)]
 pub struct ActiveGame {
-    pub map: map::GameMap,
+    pub map: GameMap,
     pub state: GameState,
     pub started_time: u32,
 }
 
-pub fn recreate_default_map() -> Result<map::GameMap, Box<dyn Error>> {
+pub fn recreate_default_map() -> Result<GameMap, Box<dyn Error>> {
     println!("Recreating default map");
 
-    let mut file = File::create(map::DEFAULT_MAP)?;
+    let mut file = File::create(DEFAULT_MAP)?;
 
-    let map_struct = map::GameMap {
-        dimensions: map::DEFAULT_MAP_DIMENSIONS,
-        name: map::DEFAULT_MAP.to_string(),
+    let map_struct = GameMap {
+        dimensions: DEFAULT_MAP_DIMENSIONS,
+        name: DEFAULT_MAP_NAME.to_string(),
     };
 
     let encoded: Vec<u8> = serialize(&map_struct).unwrap();
@@ -53,10 +54,10 @@ pub fn recreate_default_map() -> Result<map::GameMap, Box<dyn Error>> {
     Ok(map_struct)
 }
 
-pub fn get_default_map() -> Result<map::GameMap, Box<dyn Error>> {
+pub fn get_default_map() -> Result<GameMap, Box<dyn Error>> {
     // I will probably want to use some human-readable JSON config for top-level
     // map configurations.
-    let mut map_file = match File::open(map::DEFAULT_MAP) {
+    let mut map_file = match File::open(DEFAULT_MAP) {
         Ok(f) => f,
         Err(_error) => return recreate_default_map(),
     };
@@ -69,7 +70,7 @@ pub fn get_default_map() -> Result<map::GameMap, Box<dyn Error>> {
     }
 }
 
-pub fn start_game(map: map::GameMap) -> ActiveGame {
+pub fn start_game(map: GameMap) -> ActiveGame {
     ActiveGame {
         map,
         state: GameState {

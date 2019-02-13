@@ -1,19 +1,14 @@
 #![deny(clippy::all)]
 
 #[macro_use]
-extern crate serde;
-extern crate bincode;
-extern crate serde_derive;
-extern crate serde_json;
-
 use rand::Rng;
 use std::cmp::Ordering;
 use std::io;
 
-mod game;
-mod geometry;
+extern crate rust_tower_defense;
 
-use geometry::Polygon;
+use rust_tower_defense::geometry::Polygon;
+use rust_tower_defense::{game, geometry};
 
 fn main() {
     let map = match game::get_default_map() {
