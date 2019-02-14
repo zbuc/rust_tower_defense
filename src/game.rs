@@ -87,7 +87,7 @@ fn call_with_different_values() {
 
 #[test]
 fn call_with_different_types() {
-    let mut c = Cacher::new(|a| "some_str");
+    let mut c = Cacher::new(|_a| "some_str");
 
     let v1 = c.value(1);
     let v2 = c.value(2);
@@ -95,7 +95,7 @@ fn call_with_different_types() {
     assert_eq!(v1, v2);
     assert_eq!(v1, "some_str");
 
-    let mut c = Cacher::new(|a| 1);
+    let mut c = Cacher::new(|_a| 1);
 
     let v1 = c.value("foo");
     let v2 = c.value("bar");
