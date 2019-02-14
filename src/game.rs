@@ -39,31 +39,37 @@ pub struct ActiveGame {
     pub started_time: u32,
 }
 
-struct Cacher<T>
-    where T: Fn(u32) -> u32
+struct Cacher<T, U, V>
+where
+    T: Fn(U) -> V,
 {
     calculation: T,
-    values: HashMap<u32, u32>,
+    values: HashMap<U, V>,
 }
 
-impl<T> Cacher<T>
-    where T: Fn(u32) -> u32
+impl<T, U, V> Cacher<T, U, V>
+where
+    T: Fn(U) -> V,
+    U: std::cmp::Eq + std::hash::Hash + std::cmp::PartialEq + Copy,
+    V: std::cmp::Eq + Copy,
 {
-    fn new(calculation: T) -> Cacher<T> {
+    fn new(calculation: T) -> Cacher<T, U, V>
+    {
         Cacher {
             calculation,
             values: HashMap::new(),
         }
     }
 
-    fn value(&mut self, arg: u32) -> u32 {
+    fn value(&mut self, arg: U) -> V
+    {
         match self.values.get(&arg) {
             Some(v) => *v,
             None => {
                 let v = (self.calculation)(arg);
                 self.values.insert(arg, v);
                 v
-            },
+            }
         }
     }
 }
