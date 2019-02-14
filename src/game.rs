@@ -85,6 +85,17 @@ fn call_with_different_values() {
     assert_eq!(v2, 2);
 }
 
+#[test]
+fn call_with_different_types() {
+    let mut c = Cacher::new(|a| "some_str");
+
+    let v1 = c.value(1);
+    let v2 = c.value(2);
+
+    assert_eq!(v1, v2);
+    assert_eq!(v1, "some_str");
+}
+
 pub fn recreate_default_map() -> Result<GameMap, Box<dyn Error>> {
     println!("Recreating default map");
 
