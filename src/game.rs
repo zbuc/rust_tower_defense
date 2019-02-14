@@ -53,16 +53,14 @@ where
     U: std::cmp::Eq + std::hash::Hash + std::cmp::PartialEq + Copy,
     V: std::cmp::Eq + Copy,
 {
-    fn new(calculation: T) -> Cacher<T, U, V>
-    {
+    fn new(calculation: T) -> Cacher<T, U, V> {
         Cacher {
             calculation,
             values: HashMap::new(),
         }
     }
 
-    fn value(&mut self, arg: U) -> V
-    {
+    fn value(&mut self, arg: U) -> V {
         match self.values.get(&arg) {
             Some(v) => *v,
             None => {
@@ -120,6 +118,13 @@ pub fn recreate_default_map() -> Result<GameMap, Box<dyn Error>> {
     Ok(map_struct)
 }
 
+/// Loads the default map from the environment variable DEFAULT_MAP,
+/// and returns a Ok variant containing the default map struct, or an error.
+///
+/// # Errors
+///
+/// If there is any issue loading the map file from disk, an Err variant will
+/// be returned.
 pub fn get_default_map() -> Result<GameMap, Box<dyn Error>> {
     // I will probably want to use some human-readable JSON config for top-level
     // map configurations.
