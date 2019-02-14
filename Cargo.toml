@@ -3,6 +3,8 @@ name = "rust_tower_defense"
 version = "0.1.0"
 authors = ["Chris Czub <chris.czub@gmail.com>"]
 edition = "2018"
+license = "MIT"
+description = "The Rust Tower Defense project, blogged at https://czub.us/blog/rust_gamedev/"
 
 [dependencies]
 rand = "0.6.5"
