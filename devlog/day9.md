@@ -28,3 +28,5 @@ https://vulkan-tutorial.com/images/vulkan_simplified_pipeline.svg
 Vertex/Index Buffer -> Input Assembler -> Vertex Shader -> Tessellation -> Geometry Shader -> Rasterization -> Fragment Shader -> Color Blending -> Framebuffer
 
 The Vulkan tutorial is very useful for learning how a graphics pipeline works.
+
+Fullscreen mode: https://github.com/tomaka/winit/blob/master/examples/fullscreen.rs

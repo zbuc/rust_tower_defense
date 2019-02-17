@@ -25,7 +25,7 @@ extern crate winit;
 
 use std::error::Error;
 use std::fs::{File};
-use std::io::Read;
+use std::io::{self,Read,Write};
 use std::path::{Path, PathBuf};
 
 use hal::{
@@ -65,6 +65,9 @@ pub fn run() {
 struct WindowState {
     events_loop: EventsLoop,
     window: Window,
+    is_maximized: bool,
+    is_fullscreen: bool,
+    decorations: bool,
 }
 
 /// The state object for the graphics backend.
@@ -151,16 +154,76 @@ impl RustTowerDefenseApplication {
         instance.create_surface(window)
     }
 
+    // https://github.com/tomaka/winit/blob/master/examples/fullscreen.rs
+    fn get_monitor(events_loop: &winit::EventsLoop) -> Option<winit::MonitorId> {
+        #[cfg(target_os = "macos")]
+        let mut macos_use_simple_fullscreen = false;
+
+        // On macOS there are two fullscreen modes "native" and "simple"
+        #[cfg(target_os = "macos")]
+        {
+            print!("Please choose the fullscreen mode: (1) native, (2) simple: ");
+            io::stdout().flush().unwrap();
+
+            let mut num = String::new();
+            io::stdin().read_line(&mut num).unwrap();
+            let num = num.trim().parse().ok().expect("Please enter a number");
+            match num {
+                2 => macos_use_simple_fullscreen = true,
+                _ => {}
+            }
+
+            // Prompt for monitor when using native fullscreen
+            if !macos_use_simple_fullscreen {
+                Some(RustTowerDefenseApplication::prompt_for_monitor(&events_loop))
+            } else {
+                None
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Some(RustTowerDefenseApplication::prompt_for_monitor(&events_loop))
+    }
+
+    /// Enumerate monitors and prompt user to choose one
+    fn prompt_for_monitor(events_loop: &winit::EventsLoop) -> winit::MonitorId {
+        for (num, monitor) in events_loop.get_available_monitors().enumerate() {
+            println!("Monitor #{}: {:?}", num, monitor.get_name());
+        }
+
+        print!("Please write the number of the monitor to use: ");
+        io::stdout().flush().unwrap();
+
+        let mut num = String::new();
+        io::stdin().read_line(&mut num).unwrap();
+        let num = num.trim().parse().ok().expect("Please enter a number");
+        let monitor = events_loop.get_available_monitors().nth(num).expect("Please enter a valid ID");
+
+        println!("Using {:?}", monitor.get_name());
+
+        monitor
+    }
+
     /// Initializes the window state. Creates a new event loop, builds the window
     /// at the desired resolution, sets the title, and returns the newly created window
     /// with those parameters.
     fn init_window() -> WindowState {
         let events_loop = EventsLoop::new();
+
+        let monitor = RustTowerDefenseApplication::get_monitor(&events_loop);
+
+        let is_fullscreen = monitor.is_some();
+
         let window_builder = WindowBuilder::new()
+            .with_fullscreen(monitor)
             .with_dimensions(dpi::LogicalSize::new(1024., 768.))
             .with_title(WINDOW_NAME.to_string());
         let window = window_builder.build(&events_loop).unwrap();
+
         WindowState {
+            is_fullscreen,
+            is_maximized: false,
+            decorations: true,
             events_loop,
             window: window,
         }
