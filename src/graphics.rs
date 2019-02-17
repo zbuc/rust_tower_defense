@@ -31,9 +31,9 @@ use std::io::{self,Read,Write};
 use std::path::{Path, PathBuf};
 
 use hal::{
-    format, image, pass, pso, queue, window, Adapter, Backbuffer, Backend, Capability, Device,
-    Features, Gpu, Graphics, Instance, PhysicalDevice, Primitive, QueueFamily, Surface,
-    SwapchainConfig,
+    command, format, image, pass, pool, pso, queue, window, Adapter, Backbuffer, Backend,
+    Capability, Device, Features, Gpu, Graphics, Instance, PhysicalDevice, Primitive, QueueFamily,
+    Surface, SwapchainConfig,
 };
 use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
@@ -82,6 +82,9 @@ struct WindowState {
 
 /// The state object for the graphics backend.
 struct HalState {
+    _submission_command_buffers:
+        Vec<command::CommandBuffer<back::Backend, Graphics, command::MultiShot, command::Primary>>,
+    command_pool: pool::CommandPool<back::Backend, Graphics>,
     swapchain_framebuffers: Vec<<back::Backend as Backend>::Framebuffer>,
     gfx_pipeline: <back::Backend as Backend>::GraphicsPipeline,
     descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout>,
@@ -106,6 +109,8 @@ impl HalState {
     /// be destroyed, and the frame images need to be destroyed.
     unsafe fn clean_up(self) {
         let device = &self.device;
+
+        device.destroy_command_pool(self.command_pool.into_raw());
 
         for framebuffer in self.swapchain_framebuffers {
             device.destroy_framebuffer(framebuffer);
@@ -274,6 +279,8 @@ impl RustTowerDefenseApplication {
     ) -> (
         <back::Backend as Backend>::Device,
         Vec<queue::CommandQueue<back::Backend, Graphics>>,
+        queue::QueueType,
+        queue::family::QueueFamilyId,
     ) {
         let family = adapter
             .queue_families
@@ -308,7 +315,7 @@ impl RustTowerDefenseApplication {
 
         let command_queues: Vec<_> = queue_group.queues.drain(..1).collect();
 
-        (device, command_queues)
+        (device, command_queues, family.queue_type(), family.id())
     }
 
     /// Creates a new instance of the graphics device's state. This maintains
@@ -318,7 +325,7 @@ impl RustTowerDefenseApplication {
         let instance = RustTowerDefenseApplication::create_device_instance();
         let mut adapter = RustTowerDefenseApplication::pick_adapter(&instance);
         let mut surface = RustTowerDefenseApplication::create_surface(&instance, window);
-        let (device, command_queues) =
+        let (device, command_queues, queue_type, qf_id) =
             RustTowerDefenseApplication::create_device_with_graphics_queues(&mut adapter, &surface);
         let (swapchain, extent, backbuffer, format) =
             RustTowerDefenseApplication::create_swap_chain(&adapter, &device, &mut surface, None);
@@ -333,8 +340,20 @@ impl RustTowerDefenseApplication {
             &frame_images,
             extent,
         );
+        let mut command_pool =
+            RustTowerDefenseApplication::create_command_pool(&device, queue_type, qf_id);
+        let submission_command_buffers = RustTowerDefenseApplication::create_command_buffers(
+            &mut command_pool,
+            &render_pass,
+            &swapchain_framebuffers,
+            extent,
+            &gfx_pipeline,
+        );
+
 
         HalState {
+            _submission_command_buffers: submission_command_buffers,
+            command_pool,
             swapchain_framebuffers,
             gfx_pipeline,
             descriptor_set_layouts,
@@ -741,6 +760,91 @@ impl RustTowerDefenseApplication {
         }
 
         swapchain_framebuffers
+    }
+
+    /// Commands in Vulkan, like drawing operations and memory transfers, are not executed
+    /// directly using function calls. You have to record all of the operations you want to
+    /// perform in command buffer objects. The advantage of this is that all of the hard work
+    /// of setting up the drawing commands can be done in advance and in multiple threads. After
+    /// that, you just have to tell Vulkan to execute the commands in the main loop.
+    unsafe fn create_command_buffers<'a>(
+        command_pool: &'a mut pool::CommandPool<back::Backend, Graphics>,
+        render_pass: &<back::Backend as Backend>::RenderPass,
+        framebuffers: &[<back::Backend as Backend>::Framebuffer],
+        extent: window::Extent2D,
+        pipeline: &<back::Backend as Backend>::GraphicsPipeline,
+    ) -> Vec<command::CommandBuffer<back::Backend, Graphics, command::MultiShot, command::Primary>>
+    {
+        // pre-allocating memory primary command buffers is not necessary: HAL handles automatically
+
+        let mut submission_command_buffers: Vec<
+            command::CommandBuffer<back::Backend, Graphics, command::MultiShot, command::Primary>,
+        > = Vec::new();
+
+        for fb in framebuffers.iter() {
+            // command buffer will be returned in 'recording' state
+            // Shot: how many times a command buffer can be submitted; we want MultiShot (allow submission multiple times)
+            // Level: command buffer type (primary or secondary)
+            let mut command_buffer: command::CommandBuffer<
+                back::Backend,
+                Graphics,
+                command::MultiShot,
+                command::Primary,
+            > = command_pool.acquire_command_buffer();
+
+            // allow_pending_resubmit to be true, per vulkan-tutorial
+            command_buffer.begin(true);
+            command_buffer.bind_graphics_pipeline(pipeline);
+            {
+                // begin render pass
+                let render_area = pso::Rect {
+                    x: 0,
+                    y: 0,
+                    w: extent.width as _,
+                    h: extent.height as _,
+                };
+                let clear_values = vec![command::ClearValue::Color(command::ClearColor::Float([
+                    0.0, 0.0, 0.0, 1.0,
+                ]))];
+
+                let mut render_pass_inline_encoder = command_buffer.begin_render_pass_inline(
+                    render_pass,
+                    fb,
+                    render_area,
+                    clear_values.iter(),
+                );
+                // HAL encoder draw command is best understood by seeing how it expands out:
+                // vertex_count = vertices.end - vertices.start
+                // instance_count = instances.end - instances.start
+                // first_vertex = vertices.start
+                // first_instance = instances.start
+                render_pass_inline_encoder.draw(0..3, 0..1);
+            }
+
+            command_buffer.finish();
+            submission_command_buffers.push(command_buffer);
+        }
+
+        submission_command_buffers
+    }
+
+    /// We have to create a command pool before we can create command buffers.
+    /// Command pools manage the memory that is used to store the buffers and
+    /// command buffers are allocated from them.
+    unsafe fn create_command_pool(
+        device: &<back::Backend as Backend>::Device,
+        queue_type: queue::QueueType,
+        qf_id: queue::family::QueueFamilyId,
+    ) -> pool::CommandPool<back::Backend, Graphics> {
+        // raw command pool: a thin wrapper around command pools
+        // strongly typed command pool: a safe wrapper around command pools, which ensures that only one command buffer is recorded at the same time from the current queue
+        let raw_command_pool = device
+            .create_command_pool(qf_id, pool::CommandPoolCreateFlags::empty())
+            .unwrap();
+
+        // safety check necessary before creating a strongly typed command pool
+        assert_eq!(Graphics::supported_by(queue_type), true);
+        pool::CommandPool::new(raw_command_pool)
     }
 
     /// Runs window state's event loop until a CloseRequested event is received
