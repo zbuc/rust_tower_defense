@@ -31,8 +31,9 @@ use std::io::{self,Read,Write};
 use std::path::{Path, PathBuf};
 
 use hal::{
-    format, image, pso, queue, window, Adapter, Backbuffer, Backend, Capability, Device, Features, Gpu,
-    Graphics, Instance, PhysicalDevice, Primitive, QueueFamily, Surface, SwapchainConfig,
+    format, image, pass, pso, queue, window, Adapter, Backbuffer, Backend, Capability, Device,
+    Features, Gpu, Graphics, Instance, PhysicalDevice, Primitive, QueueFamily, Surface,
+    SwapchainConfig,
 };
 use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
@@ -81,6 +82,9 @@ struct WindowState {
 
 /// The state object for the graphics backend.
 struct HalState {
+    descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout>,
+    pipeline_layout: <back::Backend as Backend>::PipelineLayout,
+    render_pass: <back::Backend as Backend>::RenderPass,
     frame_images: Vec<(
         <back::Backend as Backend>::Image,
         <back::Backend as Backend>::ImageView,
@@ -96,10 +100,18 @@ struct HalState {
 
 impl HalState {
     /// Clean up things on the graphics device's state, right now the
-    /// swapchain needs to be destroyed, and the frame images need to
-    /// be destroyed.
+    /// render pipeline & layout need to be destroyed, the swapchain needs to
+    /// be destroyed, and the frame images need to be destroyed.
     unsafe fn clean_up(self) {
         let device = &self.device;
+
+        for descriptor_set_layout in self.descriptor_set_layouts {
+            device.destroy_descriptor_set_layout(descriptor_set_layout);
+        }
+
+        device.destroy_pipeline_layout(self.pipeline_layout);
+
+        device.destroy_render_pass(self.render_pass);
 
         for (_, image_view) in self.frame_images.into_iter() {
             device.destroy_image_view(image_view);
@@ -304,8 +316,15 @@ impl RustTowerDefenseApplication {
             RustTowerDefenseApplication::create_swap_chain(&adapter, &device, &mut surface, None);
         let frame_images =
             RustTowerDefenseApplication::create_image_views(backbuffer, format, &device);
+        let render_pass = RustTowerDefenseApplication::create_render_pass(&device, Some(format));
+        let (descriptor_set_layouts, pipeline_layout) =
+            RustTowerDefenseApplication::create_graphics_pipeline(&device, extent);
+
 
         HalState {
+            descriptor_set_layouts,
+            pipeline_layout,
+            render_pass,
             frame_images,
             _format: format,
             swapchain,
@@ -445,7 +464,53 @@ impl RustTowerDefenseApplication {
         Ok(shader_data)
     }
 
-    #[allow(dead_code)]
+    /// Creates the RenderPass.
+    /// Before we can finish creating the pipeline, we need to tell Vulkan about
+    /// the framebuffer attachments that will be used while rendering. We need to
+    /// specify how many color and depth buffers there will be, how many samples to
+    /// use for each of them and how their contents should be handled throughout the
+    /// rendering operations. All of this information is wrapped in a render pass object.
+    fn create_render_pass(
+        device: &<back::Backend as Backend>::Device,
+        format: Option<format::Format>,
+    ) -> <back::Backend as Backend>::RenderPass {
+        let samples: u8 = 1;
+
+        let ops = pass::AttachmentOps {
+            load: pass::AttachmentLoadOp::Clear,
+            store: pass::AttachmentStoreOp::Store,
+        };
+
+        let stencil_ops = pass::AttachmentOps::DONT_CARE;
+
+        let layouts = image::Layout::Undefined..image::Layout::Present;
+
+        let color_attachment = pass::Attachment {
+            format,
+            samples,
+            ops,
+            stencil_ops,
+            layouts,
+        };
+
+        let color_attachment_ref: pass::AttachmentRef = (0, image::Layout::ColorAttachmentOptimal);
+
+        // hal assumes pipeline bind point is GRAPHICS
+        let subpass = pass::SubpassDesc {
+            colors: &[color_attachment_ref],
+            depth_stencil: None,
+            inputs: &[],
+            resolves: &[],
+            preserves: &[],
+        };
+
+        unsafe {
+            device
+                .create_render_pass(&[color_attachment], &[subpass], &[])
+                .unwrap()
+        }
+    }
+
     unsafe fn create_graphics_pipeline(
         device: &<back::Backend as Backend>::Device,
         extent: window::Extent2D,
