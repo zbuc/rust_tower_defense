@@ -29,8 +29,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use hal::{
-    format, image, queue, window, Adapter, Backbuffer, Backend, Capability, Device, Features, Gpu,
-    Graphics, Instance, PhysicalDevice, QueueFamily, Surface, SwapchainConfig,
+    format, image, pso, queue, window, Adapter, Backbuffer, Backend, Capability, Device, Features, Gpu,
+    Graphics, Instance, PhysicalDevice, Primitive, QueueFamily, Surface, SwapchainConfig,
 };
 use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
@@ -222,7 +222,7 @@ impl RustTowerDefenseApplication {
         let mut surface = RustTowerDefenseApplication::create_surface(&instance, window);
         let (device, command_queues) =
             RustTowerDefenseApplication::create_device_with_graphics_queues(&mut adapter, &surface);
-        let (swapchain, backbuffer, format) =
+        let (swapchain, extent, backbuffer, format) =
             RustTowerDefenseApplication::create_swap_chain(&adapter, &device, &mut surface, None);
         let frame_images =
             RustTowerDefenseApplication::create_image_views(backbuffer, format, &device);
@@ -284,6 +284,7 @@ impl RustTowerDefenseApplication {
         previous_swapchain: Option<<back::Backend as Backend>::Swapchain>,
     ) -> (
         <back::Backend as Backend>::Swapchain,
+        window::Extent2D,
         Backbuffer<back::Backend>,
         format::Format,
     ) {
@@ -302,13 +303,14 @@ impl RustTowerDefenseApplication {
 
         // what should default extent be?
         let swap_config = SwapchainConfig::from_caps(&caps, format, caps.extents.end);
+        let extent = swap_config.extent;
         let (swapchain, backbuffer) = unsafe {
             device
                 .create_swapchain(surface, swap_config, previous_swapchain)
                 .unwrap()
         };
 
-        (swapchain, backbuffer, format)
+        (swapchain, extent, backbuffer, format)
     }
 
     /// An image view is quite literally a view into an image. It describes how to
@@ -366,20 +368,129 @@ impl RustTowerDefenseApplication {
     }
 
     #[allow(dead_code)]
-    fn create_graphics_pipeline(device: &<back::Backend as Backend>::Device) {
+    unsafe fn create_graphics_pipeline(
+        device: &<back::Backend as Backend>::Device,
+        extent: window::Extent2D,
+    ) -> (
+        Vec<<back::Backend as Backend>::DescriptorSetLayout>,
+        <back::Backend as Backend>::PipelineLayout,
+    ) {
         let vert_shader_code = RustTowerDefenseApplication::get_shader_code("test.vert.spv")
             .expect("Error loading vertex shader code.");
 
         let frag_shader_code = RustTowerDefenseApplication::get_shader_code("test.frag.spv")
             .expect("Error loading fragment shader code.");
 
-        unsafe {
-            let vert_shader_module = device
-                .create_shader_module(&vert_shader_code)
-                .expect("Error creating shader module.");
-            let frag_shader_module = device
-                .create_shader_module(&frag_shader_code)
-                .expect("Error creating fragment module.");
+        let vert_shader_module = device
+            .create_shader_module(&vert_shader_code)
+            .expect("Error creating shader module.");
+        let frag_shader_module = device
+            .create_shader_module(&frag_shader_code)
+            .expect("Error creating fragment module.");
+
+        let (ds_layouts, pipeline_layout) = {
+            let (vs_entry, fs_entry) = (
+                pso::EntryPoint::<back::Backend> {
+                    entry: "main",
+                    module: &vert_shader_module,
+                    specialization: hal::pso::Specialization {
+                        constants: &[],
+                        data: &[],
+                    },
+                },
+                pso::EntryPoint::<back::Backend> {
+                    entry: "main",
+                    module: &frag_shader_module,
+                    specialization: hal::pso::Specialization {
+                        constants: &[],
+                        data: &[],
+                    },
+                },
+            );
+
+            let _shaders = pso::GraphicsShaderSet {
+                vertex: vs_entry,
+                hull: None,
+                domain: None,
+                geometry: None,
+                fragment: Some(fs_entry),
+            };
+
+            let _rasterizer = pso::Rasterizer {
+                depth_clamping: false,
+                polygon_mode: pso::PolygonMode::Fill,
+                cull_face: <pso::Face>::BACK,
+                front_face: pso::FrontFace::Clockwise,
+                depth_bias: None,
+                conservative: false,
+            };
+
+            // no need to set up vertex input format, as it is hardcoded
+            let _vertex_buffers: Vec<pso::VertexBufferDesc> = Vec::new();
+            let _attributes: Vec<pso::AttributeDesc> = Vec::new();
+
+            let _input_assembler = pso::InputAssemblerDesc::new(Primitive::TriangleList);
+
+            // implements optional blending description provided in vulkan-tutorial
+            let _blender = {
+                let blend_state = pso::BlendState::On {
+                    color: pso::BlendOp::Add {
+                        src: pso::Factor::One,
+                        dst: pso::Factor::Zero,
+                    },
+                    alpha: pso::BlendOp::Add {
+                        src: pso::Factor::One,
+                        dst: pso::Factor::Zero,
+                    },
+                };
+
+                pso::BlendDesc {
+                    logic_op: Some(pso::LogicOp::Copy),
+                    targets: vec![pso::ColorBlendDesc(pso::ColorMask::ALL, blend_state)],
+                }
+            };
+
+            let _depth_stencil = pso::DepthStencilDesc {
+                depth: pso::DepthTest::Off,
+                depth_bounds: false,
+                stencil: pso::StencilTest::Off,
+            };
+
+            let _multisampling: Option<pso::Multisampling> = None;
+
+            // viewports and scissors
+            let _baked_states = pso::BakedStates {
+                viewport: Some(pso::Viewport {
+                    rect: pso::Rect {
+                        x: 0,
+                        y: 0,
+                        w: extent.width as i16,
+                        h: extent.height as i16,
+                    },
+                    depth: (0.0..1.0),
+                }),
+                scissor: Some(pso::Rect {
+                    x: 0,
+                    y: 0,
+                    w: extent.width as i16,
+                    h: extent.height as i16,
+                }),
+                blend_color: None,
+                depth_bounds: None,
+            };
+
+            // with HAL, user only needs to specify whether overall state is static or dynamic
+
+            // pipeline layout
+            let bindings = Vec::<pso::DescriptorSetLayoutBinding>::new();
+            let immutable_samplers = Vec::<<back::Backend as Backend>::Sampler>::new();
+            let ds_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout> = vec![device
+                .create_descriptor_set_layout(bindings, immutable_samplers)
+                .unwrap()];
+            let push_constants = Vec::<(pso::ShaderStageFlags, std::ops::Range<u32>)>::new();
+            let layout = device
+                .create_pipeline_layout(&ds_layouts, push_constants)
+                .unwrap();
 
             // our goal is to fill out this entire struct
             //    let desc = pso::GraphicsPipelineDesc {
@@ -398,11 +509,13 @@ impl RustTowerDefenseApplication {
             //        parent,
             //    };
 
-            device.destroy_shader_module(vert_shader_module);
-            device.destroy_shader_module(frag_shader_module);
-        }
+            (ds_layouts, layout)
+        };
 
-        //    device.create_graphics_pipeline(desc, None);
+        device.destroy_shader_module(vert_shader_module);
+        device.destroy_shader_module(frag_shader_module);
+
+        (ds_layouts, pipeline_layout)
     }
 
     /// Runs window state's event loop until a CloseRequested event is received
