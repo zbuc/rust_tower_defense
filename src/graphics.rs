@@ -23,6 +23,8 @@ extern crate log;
 extern crate glsl_to_spirv;
 extern crate winit;
 
+use std::borrow::BorrowMut;
+use std::cell::RefCell;
 use std::error::Error;
 use std::fs::{File};
 use std::io::{self,Read,Write};
@@ -61,13 +63,20 @@ pub fn run() {
     }
 }
 
-/// The state object for the window.
-struct WindowState {
-    events_loop: EventsLoop,
-    window: Window,
+/// Holds configuration flags for the window.
+struct WindowConfig {
     is_maximized: bool,
     is_fullscreen: bool,
     decorations: bool,
+    #[cfg(target_os = "macos")]
+    macos_use_simple_fullscreen: bool,
+}
+
+/// The state object for the window.
+struct WindowState {
+    events_loop: RefCell<EventsLoop>,
+    window: Window,
+    window_config: RefCell<WindowConfig>,
 }
 
 /// The state object for the graphics backend.
@@ -220,12 +229,18 @@ impl RustTowerDefenseApplication {
             .with_title(WINDOW_NAME.to_string());
         let window = window_builder.build(&events_loop).unwrap();
 
-        WindowState {
-            is_fullscreen,
+        let window_config = RefCell::new(WindowConfig {
+            is_fullscreen: false,
             is_maximized: false,
             decorations: true,
-            events_loop,
+            #[cfg(target_os = "macos")]
+            macos_use_simple_fullscreen: false,
+        });
+
+        WindowState {
+            events_loop: RefCell::new(events_loop),
             window: window,
+            window_config,
         }
     }
 
@@ -590,33 +605,66 @@ impl RustTowerDefenseApplication {
     }
 
     /// Runs window state's event loop until a CloseRequested event is received
+    /// This should take a event pipe to write keyboard events to that can
+    /// be processed by other systems.
     fn main_loop(&mut self) {
         info!("Starting event loop...");
+        let mut window_config = self.window_state.window_config.borrow_mut();
         self.window_state
-            .events_loop
+            .events_loop.borrow_mut()
             .run_forever(|event| {
-            if let winit::Event::WindowEvent { event, .. } = event {
+                println!("{:?}", event);
+
                 match event {
-                    WindowEvent::KeyboardInput {
-                        input:
-                            winit::KeyboardInput {
-                                virtual_keycode: Some(winit::VirtualKeyCode::Escape),
-                                ..
-                            },
-                        ..
-                    } => ControlFlow::Break,
-                    _ => ControlFlow::Continue,
+                    Event::WindowEvent { event, .. } => match event {
+                        WindowEvent::CloseRequested => return ControlFlow::Break,
+                        WindowEvent::KeyboardInput {
+                            input:
+                                winit::KeyboardInput {
+                                    virtual_keycode: Some(virtual_code),
+                                    state,
+                                    ..
+                                },
+                            ..
+                        } => match (virtual_code, state) {
+                            (winit::VirtualKeyCode::Escape, _) => return ControlFlow::Break,
+                            (winit::VirtualKeyCode::F, winit::ElementState::Pressed) => {
+                                #[cfg(target_os = "macos")]
+                                {
+                                    if window_config.macos_use_simple_fullscreen {
+                                        use winit::os::macos::WindowExt;
+                                        if WindowExt::set_simple_fullscreen(&self.window_state.window, !window_config.is_fullscreen) {
+                                            window_config.is_fullscreen = !window_config.is_fullscreen;
+                                        }
+
+                                        return ControlFlow::Continue;
+                                    }
+                                }
+
+                                window_config.is_fullscreen = !window_config.is_fullscreen;
+                                if !window_config.is_fullscreen {
+                                    self.window_state.window.set_fullscreen(None);
+                                } else {
+                                    self.window_state.window.set_fullscreen(Some(self.window_state.window.get_current_monitor()));
+                                }
+                            }
+                            (winit::VirtualKeyCode::M, winit::ElementState::Pressed) => {
+                                window_config.is_maximized = !window_config.is_maximized;
+                                self.window_state.window.set_maximized(window_config.is_maximized);
+                            }
+                            (winit::VirtualKeyCode::D, winit::ElementState::Pressed) => {
+                                window_config.decorations = !window_config.decorations;
+                                self.window_state.window.set_decorations(window_config.decorations);
+                            }
+                            _ => (),
+                        },
+                        _ => (),
+                    },
+                    _ => {}
                 }
-            } else {
-                match event {
-                    Event::WindowEvent {
-                        event: WindowEvent::CloseRequested,
-                        ..
-                    } => ControlFlow::Break,
-                    _ => ControlFlow::Continue,
-                }
-            }
-        });
+
+                ControlFlow::Continue
+            });
     }
 
     /// Runs the application's main loop function.
