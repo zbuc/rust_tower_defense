@@ -24,7 +24,10 @@ extern crate glsl_to_spirv;
 extern crate image;
 extern crate winit;
 
-use hal::{queue, Adapter, Instance, QueueFamily};
+use hal::{
+    queue, Adapter, Backend, Capability, Features, Gpu, Graphics, Instance, PhysicalDevice,
+    QueueFamily,
+};
 use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 use log::Level;
@@ -59,6 +62,8 @@ struct WindowState {
 
 /// The state object for the graphics backend.
 struct HalState {
+    _command_queues: Vec<queue::CommandQueue<back::Backend, Graphics>>,
+    _device: <back::Backend as Backend>::Device,
     _adapter: Adapter<back::Backend>,
     _instance: back::Instance,
 }
@@ -126,12 +131,50 @@ impl RustTowerDefenseApplication {
         }
     }
 
+    /// Interfaces with the mutable physical adapter backend, providing
+    /// a higher-level interface via command queues.
+    fn create_device_with_graphics_queues(
+        adapter: &mut Adapter<back::Backend>,
+    ) -> (
+        <back::Backend as Backend>::Device,
+        Vec<queue::CommandQueue<back::Backend, Graphics>>,
+    ) {
+        let family = adapter
+            .queue_families
+            .iter()
+            .find(|family| Graphics::supported_by(family.queue_type()) && family.max_queues() > 0)
+            .expect("Could not find a queue family supporting graphics.");
+
+        // we only want to create a single queue
+        let priorities = vec![1.0; 1];
+        let families = [(family, priorities.as_slice())];
+
+        let Gpu { device, mut queues } = unsafe {
+            adapter
+                .physical_device
+                .open(&families, Features::empty())
+                .expect("Could not create device.")
+        };
+
+        let mut queue_group = queues
+            .take::<Graphics>(family.id())
+            .expect("Could not take ownership of relevant queue group.");
+
+        let command_queues: Vec<_> = queue_group.queues.drain(..1).collect();
+
+        (device, command_queues)
+    }
+
     /// Creates a new instance of the graphics device's state
     fn init_hal() -> HalState {
         let instance = RustTowerDefenseApplication::create_device_instance();
-        let adapter = RustTowerDefenseApplication::pick_adapter(&instance);
+        let mut adapter = RustTowerDefenseApplication::pick_adapter(&instance);
+        let (device, command_queues) =
+            RustTowerDefenseApplication::create_device_with_graphics_queues(&mut adapter);
 
         HalState {
+            _command_queues: command_queues,
+            _device: device,
             _adapter: adapter,
             _instance: instance,
         }
