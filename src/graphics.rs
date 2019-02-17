@@ -25,8 +25,8 @@ extern crate image;
 extern crate winit;
 
 use hal::{
-    queue, Adapter, Backend, Capability, Features, Gpu, Graphics, Instance, PhysicalDevice,
-    QueueFamily, Surface,
+    format, queue, Adapter, Backbuffer, Backend, Capability, Device, Features, Gpu,
+    Graphics, Instance, PhysicalDevice, QueueFamily, Surface, SwapchainConfig,
 };
 use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
@@ -51,7 +51,9 @@ pub fn run() {
     let mut application = RustTowerDefenseApplication::init();
     application.run();
     info!("Cleaning up the application!");
-    application.clean_up();
+    unsafe {
+        application.clean_up();
+    }
 }
 
 /// The state object for the window.
@@ -62,16 +64,20 @@ struct WindowState {
 
 /// The state object for the graphics backend.
 struct HalState {
+    swapchain: <back::Backend as Backend>::Swapchain,
     _command_queues: Vec<queue::CommandQueue<back::Backend, Graphics>>,
-    _device: <back::Backend as Backend>::Device,
+    device: <back::Backend as Backend>::Device,
     _surface: <back::Backend as Backend>::Surface,
     _adapter: Adapter<back::Backend>,
     _instance: back::Instance,
 }
 
 impl HalState {
-    /// No clean-up
-    fn clean_up(self) {}
+    /// Clean up things on the graphics device's state, right now the
+    /// swapchain needs to be destroyed.
+    unsafe fn clean_up(self) {
+        self.device.destroy_swapchain(self.swapchain);
+    }
 }
 
 /// Hold a graphics family that has been selected for the graphics
@@ -192,13 +198,16 @@ impl RustTowerDefenseApplication {
     fn init_hal(window: &Window) -> HalState {
         let instance = RustTowerDefenseApplication::create_device_instance();
         let mut adapter = RustTowerDefenseApplication::pick_adapter(&instance);
-        let surface = RustTowerDefenseApplication::create_surface(&instance, window);
+        let mut surface = RustTowerDefenseApplication::create_surface(&instance, window);
         let (device, command_queues) =
             RustTowerDefenseApplication::create_device_with_graphics_queues(&mut adapter, &surface);
+        let (swapchain, _backbuffer, _format) =
+            RustTowerDefenseApplication::create_swap_chain(&adapter, &device, &mut surface, None);
 
         HalState {
+            swapchain,
             _command_queues: command_queues,
-            _device: device,
+            device,
             _surface: surface,
             _adapter: adapter,
             _instance: instance,
@@ -241,6 +250,40 @@ impl RustTowerDefenseApplication {
         panic!("No suitable adapter");
     }
 
+    /// Creates the swapchain, which represents a queue of images waiting to
+    /// be presented to the screen.
+    fn create_swap_chain(
+        adapter: &Adapter<back::Backend>,
+        device: &<back::Backend as Backend>::Device,
+        surface: &mut <back::Backend as Backend>::Surface,
+        previous_swapchain: Option<<back::Backend as Backend>::Swapchain>,
+    ) -> (
+        <back::Backend as Backend>::Swapchain,
+        Backbuffer<back::Backend>,
+        format::Format,
+    ) {
+        let (caps, formats, _present_modes) =
+            surface.compatibility(&adapter.physical_device);
+
+        let format = formats.map_or(format::Format::Rgba8Srgb, |formats| {
+            formats
+                .iter()
+                .find(|format| format.base_format().1 == format::ChannelType::Srgb)
+                .map(|format| *format)
+                .unwrap_or(formats[0])
+        });
+
+        // what should default extent be?
+        let swap_config = SwapchainConfig::from_caps(&caps, format, caps.extents.end);
+        let (swapchain, backbuffer) = unsafe {
+            device
+                .create_swapchain(surface, swap_config, previous_swapchain)
+                .unwrap()
+        };
+
+        (swapchain, backbuffer, format)
+    }
+
     /// Runs window state's event loop until a CloseRequested event is received
     fn main_loop(&mut self) {
         info!("Starting event loop...");
@@ -262,7 +305,7 @@ impl RustTowerDefenseApplication {
     }
 
     /// Disposes of the device's state, which may contain... stuff used by the graphics device.
-    fn clean_up(self) {
+    unsafe fn clean_up(self) {
         self.hal_state.clean_up();
     }
 }
