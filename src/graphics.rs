@@ -21,11 +21,10 @@ extern crate gfx_hal as hal;
 extern crate log;
 
 extern crate glsl_to_spirv;
-extern crate image;
 extern crate winit;
 
 use hal::{
-    format, queue, Adapter, Backbuffer, Backend, Capability, Device, Features, Gpu,
+    format, image, queue, window, Adapter, Backbuffer, Backend, Capability, Device, Features, Gpu,
     Graphics, Instance, PhysicalDevice, QueueFamily, Surface, SwapchainConfig,
 };
 use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
@@ -64,6 +63,11 @@ struct WindowState {
 
 /// The state object for the graphics backend.
 struct HalState {
+    frame_images: Vec<(
+        <back::Backend as Backend>::Image,
+        <back::Backend as Backend>::ImageView,
+    )>,
+    _format: format::Format,
     swapchain: <back::Backend as Backend>::Swapchain,
     _command_queues: Vec<queue::CommandQueue<back::Backend, Graphics>>,
     device: <back::Backend as Backend>::Device,
@@ -74,9 +78,16 @@ struct HalState {
 
 impl HalState {
     /// Clean up things on the graphics device's state, right now the
-    /// swapchain needs to be destroyed.
+    /// swapchain needs to be destroyed, and the frame images need to
+    /// be destroyed.
     unsafe fn clean_up(self) {
-        self.device.destroy_swapchain(self.swapchain);
+        let device = &self.device;
+
+        for (_, image_view) in self.frame_images.into_iter() {
+            device.destroy_image_view(image_view);
+        }
+
+        device.destroy_swapchain(self.swapchain);
     }
 }
 
@@ -110,7 +121,7 @@ impl RustTowerDefenseApplication {
     /// window and graphics state, and then return a new RustTowerDefenseApplication.
     pub fn init() -> RustTowerDefenseApplication {
         let window_state = RustTowerDefenseApplication::init_window();
-        let hal_state = RustTowerDefenseApplication::init_hal(&window_state.window);
+        let hal_state = unsafe { RustTowerDefenseApplication::init_hal(&window_state.window) };
 
         RustTowerDefenseApplication {
             hal_state,
@@ -194,17 +205,23 @@ impl RustTowerDefenseApplication {
         (device, command_queues)
     }
 
-    /// Creates a new instance of the graphics device's state
-    fn init_hal(window: &Window) -> HalState {
+    /// Creates a new instance of the graphics device's state. This maintains
+    /// everything necessary to set up the rendering pipeline from graphics device
+    /// to window surface.
+    unsafe fn init_hal(window: &Window) -> HalState {
         let instance = RustTowerDefenseApplication::create_device_instance();
         let mut adapter = RustTowerDefenseApplication::pick_adapter(&instance);
         let mut surface = RustTowerDefenseApplication::create_surface(&instance, window);
         let (device, command_queues) =
             RustTowerDefenseApplication::create_device_with_graphics_queues(&mut adapter, &surface);
-        let (swapchain, _backbuffer, _format) =
+        let (swapchain, backbuffer, format) =
             RustTowerDefenseApplication::create_swap_chain(&adapter, &device, &mut surface, None);
+        let frame_images =
+            RustTowerDefenseApplication::create_image_views(backbuffer, format, &device);
 
         HalState {
+            frame_images,
+            _format: format,
             swapchain,
             _command_queues: command_queues,
             device,
@@ -265,6 +282,8 @@ impl RustTowerDefenseApplication {
         let (caps, formats, _present_modes) =
             surface.compatibility(&adapter.physical_device);
 
+        // SRGB has "more accurate perceived colors", but
+        // working directly with SRGB is annoying, so we map from RGB to SRGB.
         let format = formats.map_or(format::Format::Rgba8Srgb, |formats| {
             formats
                 .iter()
@@ -282,6 +301,48 @@ impl RustTowerDefenseApplication {
         };
 
         (swapchain, backbuffer, format)
+    }
+
+    /// An image view is quite literally a view into an image. It describes how to
+    /// access the image and which part of the image to access, for example if it
+    /// should be treated as a 2D texture depth texture without any mipmapping levels.
+    /// 
+    /// Creates a basic image view for every image in the swap chain's backbuffer so 
+    /// that we can use them as color targets later on.
+    /// https://vulkan-tutorial.com/Drawing_a_triangle/Presentation/Image_views
+    unsafe fn create_image_views(
+        backbuffer: Backbuffer<back::Backend>,
+        format: format::Format,
+        device: &<back::Backend as Backend>::Device,
+    ) -> Vec<(
+        <back::Backend as Backend>::Image,
+        <back::Backend as Backend>::ImageView,
+    )> {
+        match backbuffer {
+            window::Backbuffer::Images(images) => images
+                .into_iter()
+                .map(|image| {
+                    let image_view = match device.create_image_view(
+                        &image,
+                        image::ViewKind::D2,
+                        format,
+                        format::Swizzle::NO,
+                        image::SubresourceRange {
+                            aspects: format::Aspects::COLOR,
+                            levels: 0..1,
+                            layers: 0..1,
+                        },
+                    ) {
+                        Ok(image_view) => image_view,
+                        Err(_) => panic!("Error creating image view for an image!"),
+                    };
+
+                    (image, image_view)
+                })
+                .collect(),
+            // OpenGL case, where backbuffer is a framebuffer, not implemented currently
+            _ => unimplemented!(),
+        }
     }
 
     /// Runs window state's event loop until a CloseRequested event is received
