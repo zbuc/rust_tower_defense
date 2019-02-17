@@ -33,12 +33,13 @@ use std::path::{Path, PathBuf};
 use hal::{
     command, format, image, pass, pool, pso, queue, window, Adapter, Backbuffer, Backend,
     Capability, Device, Features, Gpu, Graphics, Instance, PhysicalDevice, Primitive, QueueFamily,
-    Surface, SwapchainConfig,
+    Surface, Swapchain, SwapchainConfig,
 };
 use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 //use log::Level;
 
+const MAX_FRAMES_IN_FLIGHT: usize = 2;
 static WINDOW_NAME: &str = "Rust Tower Defense 0.1.0";
 static SHADER_DIR: &str = "./assets/gen/shaders/";
 
@@ -75,14 +76,17 @@ struct WindowConfig {
 
 /// The state object for the window.
 struct WindowState {
-    events_loop: RefCell<EventsLoop>,
+    events_loop: Option<EventsLoop>,
     window: Window,
     window_config: RefCell<WindowConfig>,
 }
 
 /// The state object for the graphics backend.
 struct HalState {
-    _submission_command_buffers:
+    in_flight_fences: Vec<<back::Backend as Backend>::Fence>,
+    render_finished_semaphores: Vec<<back::Backend as Backend>::Semaphore>,
+    image_available_semaphores: Vec<<back::Backend as Backend>::Semaphore>,
+    submission_command_buffers:
         Vec<command::CommandBuffer<back::Backend, Graphics, command::MultiShot, command::Primary>>,
     command_pool: pool::CommandPool<back::Backend, Graphics>,
     swapchain_framebuffers: Vec<<back::Backend as Backend>::Framebuffer>,
@@ -96,7 +100,7 @@ struct HalState {
     )>,
     _format: format::Format,
     swapchain: <back::Backend as Backend>::Swapchain,
-    _command_queues: Vec<queue::CommandQueue<back::Backend, Graphics>>,
+    command_queues: Vec<queue::CommandQueue<back::Backend, Graphics>>,
     device: <back::Backend as Backend>::Device,
     _surface: <back::Backend as Backend>::Surface,
     _adapter: Adapter<back::Backend>,
@@ -109,6 +113,18 @@ impl HalState {
     /// be destroyed, and the frame images need to be destroyed.
     unsafe fn clean_up(self) {
         let device = &self.device;
+
+        for fence in self.in_flight_fences {
+            device.destroy_fence(fence)
+        }
+
+        for semaphore in self.render_finished_semaphores {
+            device.destroy_semaphore(semaphore)
+        }
+
+        for semaphore in self.image_available_semaphores {
+            device.destroy_semaphore(semaphore)
+        }
 
         device.destroy_command_pool(self.command_pool.into_raw());
 
@@ -263,7 +279,7 @@ impl RustTowerDefenseApplication {
         });
 
         WindowState {
-            events_loop: RefCell::new(events_loop),
+            events_loop: Some(events_loop),
             window: window,
             window_config,
         }
@@ -349,10 +365,14 @@ impl RustTowerDefenseApplication {
             extent,
             &gfx_pipeline,
         );
-
+        let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
+            RustTowerDefenseApplication::create_sync_objects(&device);
 
         HalState {
-            _submission_command_buffers: submission_command_buffers,
+            in_flight_fences,
+            render_finished_semaphores,
+            image_available_semaphores,
+            submission_command_buffers,
             command_pool,
             swapchain_framebuffers,
             gfx_pipeline,
@@ -362,7 +382,7 @@ impl RustTowerDefenseApplication {
             frame_images,
             _format: format,
             swapchain,
-            _command_queues: command_queues,
+            command_queues,
             device,
             _surface: surface,
             _adapter: adapter,
@@ -847,68 +867,213 @@ impl RustTowerDefenseApplication {
         pool::CommandPool::new(raw_command_pool)
     }
 
+    /// The drawFrame function will perform the following operations:
+    ///
+    /// Acquire an image from the swap chain
+    /// Execute the command buffer with that image as attachment in the framebuffer
+    /// Return the image to the swap chain for presentation
+    unsafe fn draw_frame(
+        device: &<back::Backend as Backend>::Device,
+        command_queues: &mut [queue::CommandQueue<back::Backend, Graphics>],
+        swapchain: &mut <back::Backend as Backend>::Swapchain,
+        submission_command_buffers: &[command::CommandBuffer<
+            back::Backend,
+            Graphics,
+            command::MultiShot,
+            command::Primary,
+        >],
+        image_available_semaphore: &<back::Backend as Backend>::Semaphore,
+        render_finished_semaphore: &<back::Backend as Backend>::Semaphore,
+        in_flight_fence: &<back::Backend as Backend>::Fence,
+    ) {
+        device
+            .wait_for_fence(in_flight_fence, std::u64::MAX)
+            .unwrap();
+        device.reset_fence(in_flight_fence).unwrap();
+
+        let image_index = swapchain
+            .acquire_image(
+                std::u64::MAX,
+                window::FrameSync::Semaphore(image_available_semaphore),
+            )
+            .expect("could not acquire image!");
+
+        let i = image_index as usize;
+        let submission = queue::Submission {
+            command_buffers: &submission_command_buffers[i..i + 1],
+            wait_semaphores: vec![(
+                image_available_semaphore,
+                pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+            )],
+            signal_semaphores: vec![render_finished_semaphore],
+        };
+
+        // recall we only made one queue
+        command_queues[0].submit(submission, Some(in_flight_fence));
+
+        swapchain
+            .present(
+                &mut command_queues[0],
+                image_index,
+                vec![render_finished_semaphore],
+            )
+            .expect("presentation failed!");
+    }
+
+    fn create_sync_objects(
+        device: &<back::Backend as Backend>::Device,
+    ) -> (
+        Vec<<back::Backend as Backend>::Semaphore>,
+        Vec<<back::Backend as Backend>::Semaphore>,
+        Vec<<back::Backend as Backend>::Fence>,
+    ) {
+        let mut image_available_semaphores: Vec<<back::Backend as Backend>::Semaphore> = Vec::new();
+        let mut render_finished_semaphores: Vec<<back::Backend as Backend>::Semaphore> = Vec::new();
+        let mut in_flight_fences: Vec<<back::Backend as Backend>::Fence> = Vec::new();
+
+        for _ in 0..MAX_FRAMES_IN_FLIGHT {
+            image_available_semaphores.push(device.create_semaphore().unwrap());
+            render_finished_semaphores.push(device.create_semaphore().unwrap());
+            in_flight_fences.push(device.create_fence(true).unwrap());
+        }
+
+        (
+            image_available_semaphores,
+            render_finished_semaphores,
+            in_flight_fences,
+        )
+    }
+
     /// Runs window state's event loop until a CloseRequested event is received
     /// This should take a event pipe to write keyboard events to that can
     /// be processed by other systems.
     fn main_loop(&mut self) {
-        info!("Starting event loop...");
-        let mut window_config = self.window_state.window_config.borrow_mut();
-        self.window_state
-            .events_loop.borrow_mut()
-            .run_forever(|event| {
-                println!("{:?}", event);
+        let mut current_frame: usize = 0;
 
-                match event {
-                    Event::WindowEvent { event, .. } => match event {
-                        WindowEvent::CloseRequested => return ControlFlow::Break,
-                        WindowEvent::KeyboardInput {
-                            input:
-                                winit::KeyboardInput {
-                                    virtual_keycode: Some(virtual_code),
-                                    state,
-                                    ..
-                                },
-                            ..
-                        } => match (virtual_code, state) {
-                            (winit::VirtualKeyCode::Escape, _) => return ControlFlow::Break,
-                            (winit::VirtualKeyCode::F, winit::ElementState::Pressed) => {
-                                #[cfg(target_os = "macos")]
-                                {
-                                    if window_config.macos_use_simple_fullscreen {
-                                        use winit::os::macos::WindowExt;
-                                        if WindowExt::set_simple_fullscreen(&self.window_state.window, !window_config.is_fullscreen) {
-                                            window_config.is_fullscreen = !window_config.is_fullscreen;
-                                        }
-
-                                        return ControlFlow::Continue;
-                                    }
-                                }
-
-                                window_config.is_fullscreen = !window_config.is_fullscreen;
-                                if !window_config.is_fullscreen {
-                                    self.window_state.window.set_fullscreen(None);
-                                } else {
-                                    self.window_state.window.set_fullscreen(Some(self.window_state.window.get_current_monitor()));
-                                }
-                            }
-                            (winit::VirtualKeyCode::M, winit::ElementState::Pressed) => {
-                                window_config.is_maximized = !window_config.is_maximized;
-                                self.window_state.window.set_maximized(window_config.is_maximized);
-                            }
-                            (winit::VirtualKeyCode::D, winit::ElementState::Pressed) => {
-                                window_config.decorations = !window_config.decorations;
-                                self.window_state.window.set_decorations(window_config.decorations);
-                            }
-                            _ => (),
-                        },
-                        _ => (),
-                    },
-                    _ => {}
+        let mut events_loop = self
+            .window_state
+            .events_loop
+            .take()
+            .expect("events_loop does not exist!");
+        events_loop.run_forever(|event| match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                self.hal_state
+                    .device
+                    .wait_idle()
+                    .expect("Queues are not going idle!");
+                ControlFlow::Break
+            }
+            _ => {
+                unsafe {
+                    RustTowerDefenseApplication::draw_frame(
+                        &self.hal_state.device,
+                        &mut self.hal_state.command_queues,
+                        &mut self.hal_state.swapchain,
+                        &self.hal_state.submission_command_buffers,
+                        &self.hal_state.image_available_semaphores[current_frame],
+                        &self.hal_state.render_finished_semaphores[current_frame],
+                        &self.hal_state.in_flight_fences[current_frame],
+                    );
                 }
 
+                current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+                ;
                 ControlFlow::Continue
-            });
+            }
+        });
+        self.window_state.events_loop = Some(events_loop);
     }
+    // fn main_loop(&mut self) {
+    //     info!("Starting event loop...");
+    //     let mut current_frame: usize = 0;
+
+    //     let mut window_config = self.window_state.window_config.borrow_mut();
+    //     self.window_state
+    //         .events_loop.borrow_mut()
+    //         .run_forever(|event| {
+    //             println!("{:?}", event);
+
+    //             match event {
+    //                 Event::WindowEvent { event, .. } => match event {
+    //                     WindowEvent::CloseRequested => {
+    //                         // self.hal_state
+    //                         //     .device
+    //                         //     .wait_idle()
+    //                         //     .expect("Queues are not going idle!");
+    //                         return ControlFlow::Break;
+    //                     },
+    //                     WindowEvent::KeyboardInput {
+    //                         input:
+    //                             winit::KeyboardInput {
+    //                                 virtual_keycode: Some(virtual_code),
+    //                                 state,
+    //                                 ..
+    //                             },
+    //                         ..
+    //                     } => match (virtual_code, state) {
+    //                         (winit::VirtualKeyCode::Escape, _) => {
+    //                             // self.hal_state
+    //                             //     .device
+    //                             //     .wait_idle()
+    //                             //     .expect("Queues are not going idle!");
+
+    //                             return ControlFlow::Break;
+    //                         },
+    //                         (winit::VirtualKeyCode::F, winit::ElementState::Pressed) => {
+    //                             #[cfg(target_os = "macos")]
+    //                             {
+    //                                 if window_config.macos_use_simple_fullscreen {
+    //                                     use winit::os::macos::WindowExt;
+    //                                     if WindowExt::set_simple_fullscreen(&self.window_state.window, !window_config.is_fullscreen) {
+    //                                         window_config.is_fullscreen = !window_config.is_fullscreen;
+    //                                     }
+
+    //                                     return ControlFlow::Continue;
+    //                                 }
+    //                             }
+
+    //                             window_config.is_fullscreen = !window_config.is_fullscreen;
+    //                             if !window_config.is_fullscreen {
+    //                                 self.window_state.window.set_fullscreen(None);
+    //                             } else {
+    //                                 self.window_state.window.set_fullscreen(Some(self.window_state.window.get_current_monitor()));
+    //                             }
+    //                         }
+    //                         (winit::VirtualKeyCode::M, winit::ElementState::Pressed) => {
+    //                             window_config.is_maximized = !window_config.is_maximized;
+    //                             self.window_state.window.set_maximized(window_config.is_maximized);
+    //                         }
+    //                         (winit::VirtualKeyCode::D, winit::ElementState::Pressed) => {
+    //                             window_config.decorations = !window_config.decorations;
+    //                             self.window_state.window.set_decorations(window_config.decorations);
+    //                         }
+    //                         _ => (),
+    //                     },
+    //                     _ => (),
+    //                 },
+    //                 _ => {}
+    //             }
+
+    //             unsafe {
+    //                 RustTowerDefenseApplication::draw_frame(
+    //                     &self.hal_state.device,
+    //                     &mut self.hal_state.command_queues,
+    //                     &mut self.hal_state.swapchain,
+    //                     &self.hal_state.submission_command_buffers,
+    //                     &self.hal_state.image_available_semaphores[current_frame],
+    //                     &self.hal_state.render_finished_semaphores[current_frame],
+    //                     &self.hal_state.in_flight_fences[current_frame],
+    //                 );
+    //             }
+
+    //             current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+    //             ;
+    //             ControlFlow::Continue
+    //         });
+    // }
 
     /// Runs the application's main loop function.
     fn run(&mut self) {
