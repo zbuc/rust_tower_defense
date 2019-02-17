@@ -432,6 +432,13 @@ impl RustTowerDefenseApplication {
             let _input_assembler = pso::InputAssemblerDesc::new(Primitive::TriangleList);
 
             // implements optional blending description provided in vulkan-tutorial
+            // After a fragment shader has returned a color, it needs to be combined with
+            // the color that is already in the framebuffer. This transformation is known as
+            // color blending and there are two ways to do it:
+            // Mix the old and new value to produce a final color
+            // Combine the old and new value using a bitwise operation
+            // Not really sure what we do here :)
+            // I think it's hardcoded, and this differs from Vulkan to HAL
             let _blender = {
                 let blend_state = pso::BlendState::On {
                     color: pso::BlendOp::Add {
@@ -456,6 +463,7 @@ impl RustTowerDefenseApplication {
                 stencil: pso::StencilTest::Off,
             };
 
+            // No multisampling -- it could be used for antialiasing
             let _multisampling: Option<pso::Multisampling> = None;
 
             // viewports and scissors
@@ -523,13 +531,29 @@ impl RustTowerDefenseApplication {
         info!("Starting event loop...");
         self.window_state
             .events_loop
-            .run_forever(|event| match event {
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => ControlFlow::Break,
-                _ => ControlFlow::Continue,
-            });
+            .run_forever(|event| {
+            if let winit::Event::WindowEvent { event, .. } = event {
+                match event {
+                    WindowEvent::KeyboardInput {
+                        input:
+                            winit::KeyboardInput {
+                                virtual_keycode: Some(winit::VirtualKeyCode::Escape),
+                                ..
+                            },
+                        ..
+                    } => ControlFlow::Break,
+                    _ => ControlFlow::Continue,
+                }
+            } else {
+                match event {
+                    Event::WindowEvent {
+                        event: WindowEvent::CloseRequested,
+                        ..
+                    } => ControlFlow::Break,
+                    _ => ControlFlow::Continue,
+                }
+            }
+        });
     }
 
     /// Runs the application's main loop function.
