@@ -17,6 +17,8 @@ glsl-to-spirv = "=0.1.7"
 image = "0.21.0"
 env_logger = "0.6.0"
 log = "0.4.6"
+arrayvec = "0.4.10"
+shaderc = "0.3"
 
 [dependencies.gfx-backend-gl]
 version = "0.1"
@@ -24,23 +26,27 @@ features = ["glutin"]
 optional = true
 
 [dependencies.gfx-backend-vulkan]
-git = "https://github.com/gfx-rs/gfx"
+version = "0.1"
+#git = "https://github.com/gfx-rs/gfx"
 optional = true
-rev = "c16898e3"
+#rev = "c16898e3"
 
 [target.'cfg(any(target_os = "macos", all(target_os = "ios", target_arch = "aarch64")))'.dependencies.gfx-backend-metal]
 optional = true
-rev = "c16898e3"
-git = "https://github.com/gfx-rs/gfx"
+version = "0.1"
+#rev = "c16898e3"
+#git = "https://github.com/gfx-rs/gfx"
 
 [target.'cfg(windows)'.dependencies.gfx-backend-dx12]
 optional = true
-rev = "c16898e3"
-git = "https://github.com/gfx-rs/gfx"
+version = "0.1"
+#rev = "c16898e3"
+#git = "https://github.com/gfx-rs/gfx"
 
 [dependencies.gfx-hal]
-git = "https://github.com/gfx-rs/gfx"
-rev = "c16898e3"
+version = "0.1"
+#git = "https://github.com/gfx-rs/gfx"
+#rev = "c16898e3"
 
 [build-dependencies]
 glsl-to-spirv = "=0.1.7"
