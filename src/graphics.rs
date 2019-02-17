@@ -23,6 +23,11 @@ extern crate log;
 extern crate glsl_to_spirv;
 extern crate winit;
 
+use std::error::Error;
+use std::fs::{File};
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
 use hal::{
     format, image, queue, window, Adapter, Backbuffer, Backend, Capability, Device, Features, Gpu,
     Graphics, Instance, PhysicalDevice, QueueFamily, Surface, SwapchainConfig,
@@ -32,6 +37,7 @@ use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEv
 //use log::Level;
 
 static WINDOW_NAME: &str = "Rust Tower Defense 0.1.0";
+static SHADER_DIR: &str = "./assets/gen/shaders/";
 
 /// Runs the main graphics event loop.
 ///
@@ -115,6 +121,8 @@ struct RustTowerDefenseApplication {
     hal_state: HalState,
     window_state: WindowState,
 }
+
+type ShaderData = Vec<u8>;
 
 impl RustTowerDefenseApplication {
     /// Initialize a new instance of the application. Will initialize the
@@ -345,24 +353,54 @@ impl RustTowerDefenseApplication {
         }
     }
 
+    /// Gets the compiled shader code from the SHADER_DIR
+    pub fn get_shader_code(shader_name: &str) -> Result<ShaderData, Box<dyn Error>> {
+        // I will probably want to use some human-readable JSON config for top-level
+        // map configurations.
+        let shader_path = Path::new(SHADER_DIR).join(shader_name);
+        let mut shader_file = File::open(shader_path)?;
+        let mut shader_data = Vec::<u8>::new();
+        shader_file.read_to_end(&mut shader_data)?;
+
+        Ok(shader_data)
+    }
+
     #[allow(dead_code)]
-    fn create_graphics_pipeline() {
-        // our goal is to fill out this entire struct
-        //    let desc = pso::GraphicsPipelineDesc {
-        //        shaders,
-        //        rasterizer,
-        //        vertex_buffers,
-        //        attributes,
-        //        input_assembler,
-        //        blender,
-        //        depth_stencil,
-        //        multisampling,
-        //        baked_states,
-        //        layout,
-        //        subpass,
-        //        flags,
-        //        parent,
-        //    };
+    fn create_graphics_pipeline(device: &<back::Backend as Backend>::Device) {
+        let vert_shader_code = RustTowerDefenseApplication::get_shader_code("test.vert.spv")
+            .expect("Error loading vertex shader code.");
+
+        let frag_shader_code = RustTowerDefenseApplication::get_shader_code("test.frag.spv")
+            .expect("Error loading fragment shader code.");
+
+        unsafe {
+            let vert_shader_module = device
+                .create_shader_module(&vert_shader_code)
+                .expect("Error creating shader module.");
+            let frag_shader_module = device
+                .create_shader_module(&frag_shader_code)
+                .expect("Error creating fragment module.");
+
+            // our goal is to fill out this entire struct
+            //    let desc = pso::GraphicsPipelineDesc {
+            //        shaders,
+            //        rasterizer,
+            //        vertex_buffers,
+            //        attributes,
+            //        input_assembler,
+            //        blender,
+            //        depth_stencil,
+            //        multisampling,
+            //        baked_states,
+            //        layout,
+            //        subpass,
+            //        flags,
+            //        parent,
+            //    };
+
+            device.destroy_shader_module(vert_shader_module);
+            device.destroy_shader_module(frag_shader_module);
+        }
 
         //    device.create_graphics_pipeline(desc, None);
     }
