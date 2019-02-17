@@ -16,6 +16,7 @@ winit = "0.18.1"
 glsl-to-spirv = "=0.1.7"
 image = "0.21.0"
 env_logger = "0.6.0"
+log = "0.4.6"
 
 [dependencies.gfx-backend-gl]
 version = "0.1"
