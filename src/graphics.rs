@@ -82,6 +82,7 @@ struct WindowState {
 
 /// The state object for the graphics backend.
 struct HalState {
+    gfx_pipeline: <back::Backend as Backend>::GraphicsPipeline,
     descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout>,
     pipeline_layout: <back::Backend as Backend>::PipelineLayout,
     render_pass: <back::Backend as Backend>::RenderPass,
@@ -104,6 +105,8 @@ impl HalState {
     /// be destroyed, and the frame images need to be destroyed.
     unsafe fn clean_up(self) {
         let device = &self.device;
+
+        device.destroy_graphics_pipeline(self.gfx_pipeline);
 
         for descriptor_set_layout in self.descriptor_set_layouts {
             device.destroy_descriptor_set_layout(descriptor_set_layout);
@@ -317,11 +320,12 @@ impl RustTowerDefenseApplication {
         let frame_images =
             RustTowerDefenseApplication::create_image_views(backbuffer, format, &device);
         let render_pass = RustTowerDefenseApplication::create_render_pass(&device, Some(format));
-        let (descriptor_set_layouts, pipeline_layout) =
-            RustTowerDefenseApplication::create_graphics_pipeline(&device, extent);
+        let (descriptor_set_layouts, pipeline_layout, gfx_pipeline) =
+            RustTowerDefenseApplication::create_graphics_pipeline(&device, extent, &render_pass);
 
 
         HalState {
+            gfx_pipeline,
             descriptor_set_layouts,
             pipeline_layout,
             render_pass,
@@ -474,6 +478,7 @@ impl RustTowerDefenseApplication {
         device: &<back::Backend as Backend>::Device,
         format: Option<format::Format>,
     ) -> <back::Backend as Backend>::RenderPass {
+        // we're not doing anything with multisampling yet, so we'll stick to 1 sample.
         let samples: u8 = 1;
 
         let ops = pass::AttachmentOps {
@@ -485,6 +490,7 @@ impl RustTowerDefenseApplication {
 
         let layouts = image::Layout::Undefined..image::Layout::Present;
 
+        // In our case we'll have just a single color buffer attachment represented by one of the images from the swap chain.
         let color_attachment = pass::Attachment {
             format,
             samples,
@@ -505,18 +511,28 @@ impl RustTowerDefenseApplication {
         };
 
         unsafe {
+            // A single render pass can consist of multiple subpasses. Subpasses are subsequent
+            // rendering operations that depend on the contents of framebuffers in previous passes,
+            // for example a sequence of post-processing effects that are applied one after another.
+            // If you group these rendering operations into one render pass, then Vulkan is able to
+            // reorder the operations and conserve memory bandwidth for possibly better performance.
+            // For our very first triangle, however, we'll stick to a single subpass.
             device
                 .create_render_pass(&[color_attachment], &[subpass], &[])
                 .unwrap()
         }
     }
 
+    /// Creates the actual graphics pipeline, consisting of programmable (shader) elements as well
+    /// as fixed functions.
     unsafe fn create_graphics_pipeline(
         device: &<back::Backend as Backend>::Device,
         extent: window::Extent2D,
+        render_pass: &<back::Backend as Backend>::RenderPass,
     ) -> (
         Vec<<back::Backend as Backend>::DescriptorSetLayout>,
         <back::Backend as Backend>::PipelineLayout,
+        <back::Backend as Backend>::GraphicsPipeline,
     ) {
         let vert_shader_code = RustTowerDefenseApplication::get_shader_code("test.vert.spv")
             .expect("Error loading vertex shader code.");
@@ -531,7 +547,7 @@ impl RustTowerDefenseApplication {
             .create_shader_module(&frag_shader_code)
             .expect("Error creating fragment module.");
 
-        let (ds_layouts, pipeline_layout) = {
+        let (ds_layouts, pipeline_layout, gfx_pipeline) = {
             let (vs_entry, fs_entry) = (
                 pso::EntryPoint::<back::Backend> {
                     entry: "main",
@@ -551,7 +567,7 @@ impl RustTowerDefenseApplication {
                 },
             );
 
-            let _shaders = pso::GraphicsShaderSet {
+            let shaders = pso::GraphicsShaderSet {
                 vertex: vs_entry,
                 hull: None,
                 domain: None,
@@ -559,7 +575,7 @@ impl RustTowerDefenseApplication {
                 fragment: Some(fs_entry),
             };
 
-            let _rasterizer = pso::Rasterizer {
+            let rasterizer = pso::Rasterizer {
                 depth_clamping: false,
                 polygon_mode: pso::PolygonMode::Fill,
                 cull_face: <pso::Face>::BACK,
@@ -569,10 +585,10 @@ impl RustTowerDefenseApplication {
             };
 
             // no need to set up vertex input format, as it is hardcoded
-            let _vertex_buffers: Vec<pso::VertexBufferDesc> = Vec::new();
-            let _attributes: Vec<pso::AttributeDesc> = Vec::new();
+            let vertex_buffers: Vec<pso::VertexBufferDesc> = Vec::new();
+            let attributes: Vec<pso::AttributeDesc> = Vec::new();
 
-            let _input_assembler = pso::InputAssemblerDesc::new(Primitive::TriangleList);
+            let input_assembler = pso::InputAssemblerDesc::new(Primitive::TriangleList);
 
             // implements optional blending description provided in vulkan-tutorial
             // After a fragment shader has returned a color, it needs to be combined with
@@ -582,7 +598,7 @@ impl RustTowerDefenseApplication {
             // Combine the old and new value using a bitwise operation
             // Not really sure what we do here :)
             // I think it's hardcoded, and this differs from Vulkan to HAL
-            let _blender = {
+            let blender = {
                 let blend_state = pso::BlendState::On {
                     color: pso::BlendOp::Add {
                         src: pso::Factor::One,
@@ -600,17 +616,17 @@ impl RustTowerDefenseApplication {
                 }
             };
 
-            let _depth_stencil = pso::DepthStencilDesc {
+            let depth_stencil = pso::DepthStencilDesc {
                 depth: pso::DepthTest::Off,
                 depth_bounds: false,
                 stencil: pso::StencilTest::Off,
             };
 
             // No multisampling -- it could be used for antialiasing
-            let _multisampling: Option<pso::Multisampling> = None;
+            let multisampling: Option<pso::Multisampling> = None;
 
             // viewports and scissors
-            let _baked_states = pso::BakedStates {
+            let baked_states = pso::BakedStates {
                 viewport: Some(pso::Viewport {
                     rect: pso::Rect {
                         x: 0,
@@ -643,30 +659,44 @@ impl RustTowerDefenseApplication {
                 .create_pipeline_layout(&ds_layouts, push_constants)
                 .unwrap();
 
-            // our goal is to fill out this entire struct
-            //    let desc = pso::GraphicsPipelineDesc {
-            //        shaders,
-            //        rasterizer,
-            //        vertex_buffers,
-            //        attributes,
-            //        input_assembler,
-            //        blender,
-            //        depth_stencil,
-            //        multisampling,
-            //        baked_states,
-            //        layout,
-            //        subpass,
-            //        flags,
-            //        parent,
-            //    };
+            let subpass = pass::Subpass {
+                index: 0,
+                main_pass: render_pass,
+            };
 
-            (ds_layouts, layout)
+            let flags = pso::PipelineCreationFlags::empty();
+
+            let parent = pso::BasePipeline::None;
+
+            let gfx_pipeline = {
+                let desc = pso::GraphicsPipelineDesc {
+                    shaders,
+                    rasterizer,
+                    vertex_buffers,
+                    attributes,
+                    input_assembler,
+                    blender,
+                    depth_stencil,
+                    multisampling,
+                    baked_states,
+                    layout: &layout,
+                    subpass,
+                    flags,
+                    parent,
+                };
+
+                device
+                    .create_graphics_pipeline(&desc, None)
+                    .expect("failed to create graphics pipeline!")
+            };
+
+            (ds_layouts, layout, gfx_pipeline)
         };
 
         device.destroy_shader_module(vert_shader_module);
         device.destroy_shader_module(frag_shader_module);
 
-        (ds_layouts, pipeline_layout)
+        (ds_layouts, pipeline_layout, gfx_pipeline)
     }
 
     /// Runs window state's event loop until a CloseRequested event is received
