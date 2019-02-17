@@ -25,7 +25,7 @@ extern crate winit;
 
 use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
-static WINDOW_NAME: &str = "00_base_code";
+static WINDOW_NAME: &str = "Rust Tower Defense 0.1.0";
 
 /// Runs the main graphics event loop.
 /// 
@@ -45,7 +45,9 @@ struct WindowState {
 }
 
 /// The state object for the graphics backend.
-struct HalState {}
+struct HalState {
+    _instance: back::Instance,
+}
 
 impl HalState {
     /// No clean-up
@@ -75,6 +77,11 @@ impl RustTowerDefenseApplication {
         }
     }
 
+    /// Creates a new instance of whatever graphics backend has been selected.
+    fn create_device_instance() -> back::Instance {
+        back::Instance::create(WINDOW_NAME, 1)
+    }
+
     /// Initializes the window state. Creates a new event loop, builds the window
     /// at the desired resolution, sets the title, and returns the newly created window
     /// with those parameters.
@@ -92,7 +99,10 @@ impl RustTowerDefenseApplication {
 
     /// Creates a new instance of the graphics device's state
     fn init_hal() -> HalState {
-        HalState {}
+        let instance = RustTowerDefenseApplication::create_device_instance();
+        HalState {
+            _instance: instance,
+        }
     }
 
     /// Runs window state's event loop until a CloseRequested event is received
