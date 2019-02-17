@@ -6,6 +6,7 @@ use std::error::Error;
 use std::fs::{self, File};
 use std::io::Read;
 use std::io::Write;
+use std::rc::Rc;
 
 use super::geometry::Point;
 use crate::bincode::{deserialize, serialize};
@@ -29,7 +30,7 @@ enum GameMessage {
 
 #[derive(Debug)]
 pub struct GameState {
-    entities: Vec<GameEntity>,
+    pub entities: Vec<Rc<GameEntity>>,
 }
 
 #[derive(Debug)]

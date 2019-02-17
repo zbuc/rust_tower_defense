@@ -3,6 +3,7 @@
 //! `rust_tower_defense` contains the library code for the Rust Tower Defense project.
 pub mod game;
 pub mod geometry;
+pub mod graphics;
 
 extern crate bincode;
 extern crate serde;
