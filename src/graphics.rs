@@ -8,7 +8,6 @@
     allow(dead_code, unused_extern_crates, unused_imports)
 )]
 
-extern crate log;
 extern crate env_logger;
 #[cfg(feature = "dx12")]
 extern crate gfx_backend_dx12 as back;
@@ -19,6 +18,7 @@ extern crate gfx_backend_metal as back;
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
 extern crate gfx_hal as hal;
+extern crate log;
 
 extern crate glsl_to_spirv;
 extern crate image;
@@ -26,7 +26,7 @@ extern crate winit;
 
 use hal::{
     queue, Adapter, Backend, Capability, Features, Gpu, Graphics, Instance, PhysicalDevice,
-    QueueFamily,
+    QueueFamily, Surface,
 };
 use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
@@ -35,7 +35,7 @@ use log::Level;
 static WINDOW_NAME: &str = "Rust Tower Defense 0.1.0";
 
 /// Runs the main graphics event loop.
-/// 
+///
 /// Exits when the window is closed.
 /// Eventually we'll have a command system responsible
 /// for telling the window to close.
@@ -57,13 +57,14 @@ pub fn run() {
 /// The state object for the window.
 struct WindowState {
     events_loop: EventsLoop,
-    _window: Window,
+    window: Window,
 }
 
 /// The state object for the graphics backend.
 struct HalState {
     _command_queues: Vec<queue::CommandQueue<back::Backend, Graphics>>,
     _device: <back::Backend as Backend>::Device,
+    _surface: <back::Backend as Backend>::Surface,
     _adapter: Adapter<back::Backend>,
     _instance: back::Instance,
 }
@@ -103,7 +104,7 @@ impl RustTowerDefenseApplication {
     /// window and graphics state, and then return a new RustTowerDefenseApplication.
     pub fn init() -> RustTowerDefenseApplication {
         let window_state = RustTowerDefenseApplication::init_window();
-        let hal_state = RustTowerDefenseApplication::init_hal();
+        let hal_state = RustTowerDefenseApplication::init_hal(&window_state.window);
 
         RustTowerDefenseApplication {
             hal_state,
@@ -114,6 +115,15 @@ impl RustTowerDefenseApplication {
     /// Creates a new instance of whatever graphics backend has been selected.
     fn create_device_instance() -> back::Instance {
         back::Instance::create(WINDOW_NAME, 1)
+    }
+
+    /// Creates a surface on the provided window that displays from the provided
+    /// graphics backend instance.
+    fn create_surface(
+        instance: &back::Instance,
+        window: &Window,
+    ) -> <back::Backend as Backend>::Surface {
+        instance.create_surface(window)
     }
 
     /// Initializes the window state. Creates a new event loop, builds the window
@@ -127,14 +137,17 @@ impl RustTowerDefenseApplication {
         let window = window_builder.build(&events_loop).unwrap();
         WindowState {
             events_loop,
-            _window: window,
+            window: window,
         }
     }
 
     /// Interfaces with the mutable physical adapter backend, providing
-    /// a higher-level interface via command queues.
+    /// a higher-level interface via command queues. Checks to see that
+    /// the queue family supports both graphics and working with the provided
+    /// surface.
     fn create_device_with_graphics_queues(
         adapter: &mut Adapter<back::Backend>,
+        surface: &<back::Backend as Backend>::Surface,
     ) -> (
         <back::Backend as Backend>::Device,
         Vec<queue::CommandQueue<back::Backend, Graphics>>,
@@ -142,10 +155,20 @@ impl RustTowerDefenseApplication {
         let family = adapter
             .queue_families
             .iter()
-            .find(|family| Graphics::supported_by(family.queue_type()) && family.max_queues() > 0)
+            .find(|family| {
+                Graphics::supported_by(family.queue_type())
+                    && family.max_queues() > 0
+                    && surface.supports_queue_family(family)
+            })
             .expect("Could not find a queue family supporting graphics.");
 
         // we only want to create a single queue
+        // https://vulkan-tutorial.com/Drawing_a_triangle/Setup/Logical_device_and_queues
+        // The currently available drivers will only allow you to create a
+        // small number of queues for each queue family and you don't really
+        // need more than one. That's because you can create all of the command
+        // buffers on multiple threads and then submit them all at once on the
+        // main thread with a single low-overhead call.
         let priorities = vec![1.0; 1];
         let families = [(family, priorities.as_slice())];
 
@@ -166,15 +189,17 @@ impl RustTowerDefenseApplication {
     }
 
     /// Creates a new instance of the graphics device's state
-    fn init_hal() -> HalState {
+    fn init_hal(window: &Window) -> HalState {
         let instance = RustTowerDefenseApplication::create_device_instance();
         let mut adapter = RustTowerDefenseApplication::pick_adapter(&instance);
+        let surface = RustTowerDefenseApplication::create_surface(&instance, window);
         let (device, command_queues) =
-            RustTowerDefenseApplication::create_device_with_graphics_queues(&mut adapter);
+            RustTowerDefenseApplication::create_device_with_graphics_queues(&mut adapter, &surface);
 
         HalState {
             _command_queues: command_queues,
             _device: device,
+            _surface: surface,
             _adapter: adapter,
             _instance: instance,
         }
