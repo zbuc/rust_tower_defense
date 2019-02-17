@@ -82,6 +82,7 @@ struct WindowState {
 
 /// The state object for the graphics backend.
 struct HalState {
+    swapchain_framebuffers: Vec<<back::Backend as Backend>::Framebuffer>,
     gfx_pipeline: <back::Backend as Backend>::GraphicsPipeline,
     descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout>,
     pipeline_layout: <back::Backend as Backend>::PipelineLayout,
@@ -105,6 +106,10 @@ impl HalState {
     /// be destroyed, and the frame images need to be destroyed.
     unsafe fn clean_up(self) {
         let device = &self.device;
+
+        for framebuffer in self.swapchain_framebuffers {
+            device.destroy_framebuffer(framebuffer);
+        }
 
         device.destroy_graphics_pipeline(self.gfx_pipeline);
 
@@ -322,9 +327,15 @@ impl RustTowerDefenseApplication {
         let render_pass = RustTowerDefenseApplication::create_render_pass(&device, Some(format));
         let (descriptor_set_layouts, pipeline_layout, gfx_pipeline) =
             RustTowerDefenseApplication::create_graphics_pipeline(&device, extent, &render_pass);
-
+        let swapchain_framebuffers = RustTowerDefenseApplication::create_framebuffers(
+            &device,
+            &render_pass,
+            &frame_images,
+            extent,
+        );
 
         HalState {
+            swapchain_framebuffers,
             gfx_pipeline,
             descriptor_set_layouts,
             pipeline_layout,
@@ -697,6 +708,39 @@ impl RustTowerDefenseApplication {
         device.destroy_shader_module(frag_shader_module);
 
         (ds_layouts, pipeline_layout, gfx_pipeline)
+    }
+
+    /// Creates the framebuffers and attaches them to the device
+    fn create_framebuffers(
+        device: &<back::Backend as Backend>::Device,
+        render_pass: &<back::Backend as Backend>::RenderPass,
+        frame_images: &[(
+            <back::Backend as Backend>::Image,
+            <back::Backend as Backend>::ImageView,
+        )],
+        extent: window::Extent2D,
+    ) -> Vec<<back::Backend as Backend>::Framebuffer> {
+        let mut swapchain_framebuffers: Vec<<back::Backend as Backend>::Framebuffer> = Vec::new();
+
+        unsafe {
+            for (_, image_view) in frame_images.iter() {
+                swapchain_framebuffers.push(
+                    device
+                        .create_framebuffer(
+                            render_pass,
+                            vec![image_view],
+                            image::Extent {
+                                width: extent.width as _,
+                                height: extent.height as _,
+                                depth: 1,
+                            },
+                        )
+                        .expect("failed to create framebuffer!"),
+                );
+            }
+        }
+
+        swapchain_framebuffers
     }
 
     /// Runs window state's event loop until a CloseRequested event is received
