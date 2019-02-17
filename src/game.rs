@@ -3,7 +3,7 @@ pub mod map;
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs::{self, File};
+use std::fs::{File};
 use std::io::Read;
 use std::io::Write;
 use std::rc::Rc;
@@ -14,6 +14,7 @@ use entities::GameEntity;
 use map::{GameMap, DEFAULT_MAP, DEFAULT_MAP_DIMENSIONS, DEFAULT_MAP_NAME};
 
 #[derive(Debug)]
+#[allow(dead_code)]
 enum GameMessage {
     Interact {
         source: GameEntity,
@@ -40,6 +41,7 @@ pub struct ActiveGame {
     pub started_time: u32,
 }
 
+#[allow(dead_code)]
 struct Cacher<T, U, V>
 where
     T: Fn(U) -> V,
@@ -54,6 +56,7 @@ where
     U: std::cmp::Eq + std::hash::Hash + std::cmp::PartialEq + Copy,
     V: std::cmp::Eq + Copy,
 {
+    #[allow(dead_code)]
     fn new(calculation: T) -> Cacher<T, U, V> {
         Cacher {
             calculation,
@@ -61,6 +64,7 @@ where
         }
     }
 
+    #[allow(dead_code)]
     fn value(&mut self, arg: U) -> V {
         match self.values.get(&arg) {
             Some(v) => *v,

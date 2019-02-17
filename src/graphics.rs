@@ -29,7 +29,7 @@ use hal::{
 };
 use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
-use log::Level;
+//use log::Level;
 
 static WINDOW_NAME: &str = "Rust Tower Defense 0.1.0";
 
@@ -343,6 +343,28 @@ impl RustTowerDefenseApplication {
             // OpenGL case, where backbuffer is a framebuffer, not implemented currently
             _ => unimplemented!(),
         }
+    }
+
+    #[allow(dead_code)]
+    fn create_graphics_pipeline() {
+        // our goal is to fill out this entire struct
+        //    let desc = pso::GraphicsPipelineDesc {
+        //        shaders,
+        //        rasterizer,
+        //        vertex_buffers,
+        //        attributes,
+        //        input_assembler,
+        //        blender,
+        //        depth_stencil,
+        //        multisampling,
+        //        baked_states,
+        //        layout,
+        //        subpass,
+        //        flags,
+        //        parent,
+        //    };
+
+        //    device.create_graphics_pipeline(desc, None);
     }
 
     /// Runs window state's event loop until a CloseRequested event is received

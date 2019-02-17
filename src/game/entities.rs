@@ -24,6 +24,7 @@ impl Location for GameEntity {
 }
 
 impl GameEntity {
+    #[allow(dead_code)]
     fn can_take_damage(&self) -> bool {
         match self.entity_type {
             GameEntityType::Player => true,
