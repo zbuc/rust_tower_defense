@@ -593,22 +593,20 @@ impl UserInput {
                 ..
             } => {
                 output = UserInput::end_requested;
-            },
+            }
             Event::WindowEvent {
                 event: WindowEvent::Resized(logical),
                 ..
             } => {
                 output = UserInput::new_frame_size(Some((logical.width, logical.height)));
-            },
+            }
             Event::WindowEvent {
                 event: WindowEvent::CursorMoved { position, .. },
                 ..
             } => {
                 output = UserInput::new_mouse_position(Some((position.x, position.y)));
-            },
-            Event::WindowEvent {
-                event, ..
-            } => (),
+            }
+            Event::WindowEvent { event, .. } => (),
             _ => (),
             // } => match event {
             //     WindowEvent::KeyboardInput {
@@ -654,11 +652,11 @@ impl LocalState {
             UserInput::new_frame_size(Some(frame_size)) => {
                 self.frame_width = frame_size.0;
                 self.frame_height = frame_size.1;
-            },
+            }
             UserInput::new_mouse_position(Some(position)) => {
                 self.mouse_x = position.0;
                 self.mouse_y = position.1;
-            },
+            }
             _ => (),
         };
     }
@@ -1232,7 +1230,7 @@ impl RustTowerDefenseApplication {
                 Some(r) => {
                     local_state.update_from_input(r);
                 }
-                None => ()
+                None => (),
             };
             if let Err(e) = self.do_the_render(&local_state) {
                 error!("Rendering Error: {:?}", e);
