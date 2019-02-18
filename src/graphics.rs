@@ -100,8 +100,8 @@ pub fn run() {
     info!("Starting the application!");
     let mut application = RustTowerDefenseApplication::init();
     application.run();
-    info!("Cleaning up the application!");
-    drop(application);
+    //info!("Cleaning up the application!");
+    //drop(application);
 }
 
 /// Holds configuration flags for the window.
@@ -196,11 +196,6 @@ impl core::ops::Drop for HalState {
 }
 
 impl HalState {
-    /// Clean up things on the graphics device's state, right now the
-    /// render pipeline & layout need to be destroyed, the swapchain needs to
-    /// be destroyed, and the frame images need to be destroyed.
-    unsafe fn clean_up(self) {}
-
     pub fn new(window: &Window) -> Result<Self, &'static str> {
         // Create An Instance
         let instance = back::Instance::create(WINDOW_NAME, 1);
@@ -663,7 +658,7 @@ impl QueueFamilyIds {
 /// the systems' manager at some point, or reference it from
 /// the systems' manager.
 struct RustTowerDefenseApplication {
-    hal_state: RefCell<HalState>,
+    hal_state: HalState,
     window_state: WindowState,
 }
 
@@ -680,7 +675,7 @@ impl RustTowerDefenseApplication {
         };
 
         RustTowerDefenseApplication {
-            hal_state: RefCell::new(hal_state),
+            hal_state: hal_state,
             window_state,
         }
     }
@@ -1850,84 +1845,6 @@ impl RustTowerDefenseApplication {
         pool::CommandPool::new(raw_command_pool)
     }
 
-    /// The drawFrame function will perform the following operations:
-    ///
-    /// Acquire an image from the swap chain
-    /// Execute the command buffer with that image as attachment in the framebuffer
-    /// Return the image to the swap chain for presentation
-    unsafe fn draw_frame(
-        device: &<back::Backend as Backend>::Device,
-        command_queues: &mut [queue::CommandQueue<back::Backend, Graphics>],
-        swapchain: &mut <back::Backend as Backend>::Swapchain,
-        command_buffers: &[command::CommandBuffer<
-            back::Backend,
-            Graphics,
-            command::MultiShot,
-            command::Primary,
-        >],
-        image_available_semaphore: &<back::Backend as Backend>::Semaphore,
-        render_finished_semaphore: &<back::Backend as Backend>::Semaphore,
-        in_flight_fence: &<back::Backend as Backend>::Fence,
-    ) {
-        device
-            .wait_for_fence(in_flight_fence, std::u64::MAX)
-            .unwrap();
-        device.reset_fence(in_flight_fence).unwrap();
-
-        let image_index = swapchain
-            .acquire_image(
-                std::u64::MAX,
-                window::FrameSync::Semaphore(image_available_semaphore),
-            )
-            .expect("could not acquire image!");
-
-        let i = image_index as usize;
-        let submission = queue::Submission {
-            command_buffers: &command_buffers[i..i + 1],
-            wait_semaphores: vec![(
-                image_available_semaphore,
-                pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
-            )],
-            signal_semaphores: vec![render_finished_semaphore],
-        };
-
-        // recall we only made one queue
-        command_queues[0].submit(submission, Some(in_flight_fence));
-
-        swapchain
-            .present(
-                &mut command_queues[0],
-                image_index,
-                vec![render_finished_semaphore],
-            )
-            .unwrap();
-        //.expect("presentation failed!");
-    }
-
-    fn create_sync_objects(
-        device: &<back::Backend as Backend>::Device,
-    ) -> (
-        Vec<<back::Backend as Backend>::Semaphore>,
-        Vec<<back::Backend as Backend>::Semaphore>,
-        Vec<<back::Backend as Backend>::Fence>,
-    ) {
-        let mut image_available_semaphores: Vec<<back::Backend as Backend>::Semaphore> = Vec::new();
-        let mut render_finished_semaphores: Vec<<back::Backend as Backend>::Semaphore> = Vec::new();
-        let mut in_flight_fences: Vec<<back::Backend as Backend>::Fence> = Vec::new();
-
-        for _ in 0..MAX_FRAMES_IN_FLIGHT {
-            image_available_semaphores.push(device.create_semaphore().unwrap());
-            render_finished_semaphores.push(device.create_semaphore().unwrap());
-            in_flight_fences.push(device.create_fence(true).unwrap());
-        }
-
-        (
-            image_available_semaphores,
-            render_finished_semaphores,
-            in_flight_fences,
-        )
-    }
-
     fn do_the_render(&mut self, local_state: &LocalState) -> Result<(), &'static str> {
         let x = ((local_state.mouse_x / local_state.frame_width) * 2.0) - 1.0;
         let y = ((local_state.mouse_y / local_state.frame_height) * 2.0) - 1.0;
@@ -1940,7 +1857,7 @@ impl RustTowerDefenseApplication {
     /// Runs window state's event loop until a CloseRequested event is received
     /// This should take a event pipe to write keyboard events to that can
     /// be processed by other systems.
-    fn main_loop(&mut self) {
+    fn main_loop(mut self) {
         let (frame_width, frame_height) = self
             .window_state
             .window
@@ -1965,16 +1882,17 @@ impl RustTowerDefenseApplication {
             if inputs.end_requested {
                 break;
             }
+            if inputs.new_frame_size.is_some() {
+                debug!("Window changed size, restarting HalState...");
+                drop(self.hal_state);
+                self.hal_state = HalState::new(&self.window_state.window).unwrap();
+            }
+            local_state.update_from_input(inputs);
             if let Err(e) = self.do_the_render(&local_state) {
                 error!("Rendering Error: {:?}", e);
                 debug!("Auto-restarting HalState...");
-                drop(self.hal_state.borrow_mut());
-                match HalState::new(&self.window_state.window) {
-                    Ok(state) => {
-                        self.hal_state = RefCell::new(state);
-                    }
-                    Err(e) => panic!(e),
-                };
+                drop(self.hal_state);
+                self.hal_state = HalState::new(&self.window_state.window).unwrap();
             }
         }
     }
@@ -2099,7 +2017,7 @@ impl RustTowerDefenseApplication {
     // }
 
     /// Runs the application's main loop function.
-    fn run(&mut self) {
+    fn run(mut self) {
         info!("Running application...");
         self.main_loop();
     }
