@@ -23,6 +23,7 @@ extern crate log;
 extern crate glsl_to_spirv;
 extern crate winit;
 
+use std::mem;
 use std::borrow::BorrowMut;
 use std::cell::{RefCell, RefMut};
 use std::error::Error;
@@ -598,6 +599,27 @@ impl UserInput {
                 ..
             } => {
                 output.new_mouse_position = Some((position.x, position.y));
+            },
+            Event::WindowEvent {
+                event, ..
+            } => match event {
+                WindowEvent::KeyboardInput {
+                    input:
+                        winit::KeyboardInput {
+                            virtual_keycode: Some(virtual_code),
+                            state,
+                            ..
+                        },
+                    ..
+                } => match (virtual_code, state) {
+                    (winit::VirtualKeyCode::Escape, _) => {
+                        debug!("ESC");
+                    }
+                    _ => {
+                        debug!("Keypress: {:#?}", virtual_code);
+                    },
+                }
+                _ => (),
             }
             _ => (),
         });
@@ -678,20 +700,6 @@ impl RustTowerDefenseApplication {
             hal_state: hal_state,
             window_state,
         }
-    }
-
-    /// Creates a new instance of whatever graphics backend has been selected.
-    fn create_device_instance() -> back::Instance {
-        back::Instance::create(WINDOW_NAME, 1)
-    }
-
-    /// Creates a surface on the provided window that displays from the provided
-    /// graphics backend instance.
-    fn create_surface(
-        instance: &back::Instance,
-        window: &Window,
-    ) -> <back::Backend as Backend>::Surface {
-        instance.create_surface(window)
     }
 
     // https://github.com/tomaka/winit/blob/master/examples/fullscreen.rs
@@ -785,522 +793,6 @@ impl RustTowerDefenseApplication {
         }
     }
 
-    /// Interfaces with the mutable physical adapter backend, providing
-    /// a higher-level interface via command queues. Checks to see that
-    /// the queue family supports both graphics and working with the provided
-    /// surface.
-    fn create_device_with_graphics_queues(
-        adapter: &mut Adapter<back::Backend>,
-        surface: &<back::Backend as Backend>::Surface,
-    ) -> (
-        <back::Backend as Backend>::Device,
-        Vec<queue::CommandQueue<back::Backend, Graphics>>,
-        queue::QueueType,
-        queue::family::QueueFamilyId,
-    ) {
-        let family = adapter
-            .queue_families
-            .iter()
-            .find(|family| {
-                Graphics::supported_by(family.queue_type())
-                    && family.max_queues() > 0
-                    && surface.supports_queue_family(family)
-            })
-            .expect("Could not find a queue family supporting graphics.");
-
-        // we only want to create a single queue
-        // https://vulkan-tutorial.com/Drawing_a_triangle/Setup/Logical_device_and_queues
-        // The currently available drivers will only allow you to create a
-        // small number of queues for each queue family and you don't really
-        // need more than one. That's because you can create all of the command
-        // buffers on multiple threads and then submit them all at once on the
-        // main thread with a single low-overhead call.
-        let priorities = vec![1.0; 1];
-        let families = [(family, priorities.as_slice())];
-
-        let Gpu { device, mut queues } = unsafe {
-            adapter
-                .physical_device
-                .open(&families)
-                .expect("Could not create device.")
-        };
-
-        let mut queue_group = queues
-            .take::<Graphics>(family.id())
-            .expect("Could not take ownership of relevant queue group.");
-
-        let command_queues: Vec<_> = queue_group.queues.drain(..1).collect();
-
-        (device, command_queues, family.queue_type(), family.id())
-    }
-
-    fn init_hal(window: &Window) -> Result<HalState, &'static str> {
-        // Create An Instance
-        let instance = back::Instance::create(WINDOW_NAME, 1);
-
-        // Create A Surface
-        let mut surface = instance.create_surface(window);
-
-        // Select An Adapter
-        let adapter = instance
-            .enumerate_adapters()
-            .into_iter()
-            .find(|a| {
-                a.queue_families
-                    .iter()
-                    .any(|qf| qf.supports_graphics() && surface.supports_queue_family(qf))
-            })
-            .ok_or("Couldn't find a graphical Adapter!")?;
-
-        // Open A Device and take out a QueueGroup
-        let (mut device, queue_group) = {
-            let queue_family = adapter
-                .queue_families
-                .iter()
-                .find(|qf| qf.supports_graphics() && surface.supports_queue_family(qf))
-                .ok_or("Couldn't find a QueueFamily with graphics!")?;
-            let Gpu { device, mut queues } = unsafe {
-                adapter
-                    .physical_device
-                    .open(&[(&queue_family, &[1.0; 1])])
-                    .map_err(|_| "Couldn't open the PhysicalDevice!")?
-            };
-            let queue_group = queues
-                .take::<Graphics>(queue_family.id())
-                .ok_or("Couldn't take ownership of the QueueGroup!")?;
-            if queue_group.queues.len() > 0 {
-                Ok(())
-            } else {
-                Err("The QueueGroup did not have any CommandQueues available!")
-            }?;
-            (device, queue_group)
-        };
-
-        // Create A Swapchain, this is extra long
-        let (swapchain, extent, backbuffer, format, frames_in_flight) = {
-            let (caps, preferred_formats, present_modes, composite_alphas) =
-                surface.compatibility(&adapter.physical_device);
-            info!("{:?}", caps);
-            info!("Preferred Formats: {:?}", preferred_formats);
-            info!("Present Modes: {:?}", present_modes);
-            info!("Composite Alphas: {:?}", composite_alphas);
-            //
-            let present_mode = {
-                use gfx_hal::window::PresentMode::*;
-                [Mailbox, Fifo, Relaxed, Immediate]
-                    .iter()
-                    .cloned()
-                    .find(|pm| present_modes.contains(pm))
-                    .ok_or("No PresentMode values specified!")?
-            };
-            let composite_alpha = {
-                use gfx_hal::window::CompositeAlpha::*;
-                [Opaque, Inherit, PreMultiplied, PostMultiplied]
-                    .iter()
-                    .cloned()
-                    .find(|ca| composite_alphas.contains(ca))
-                    .ok_or("No CompositeAlpha values specified!")?
-            };
-            let format = match preferred_formats {
-                None => Format::Rgba8Srgb,
-                Some(formats) => match formats
-                    .iter()
-                    .find(|format| format.base_format().1 == ChannelType::Srgb)
-                    .cloned()
-                {
-                    Some(srgb_format) => srgb_format,
-                    None => formats
-                        .get(0)
-                        .cloned()
-                        .ok_or("Preferred format list was empty!")?,
-                },
-            };
-            let extent = {
-                let window_client_area = window
-                    .get_inner_size()
-                    .ok_or("Window doesn't exist!")?
-                    .to_physical(window.get_hidpi_factor());
-                Extent2D {
-                    width: caps.extents.end.width.min(window_client_area.width as u32),
-                    height: caps
-                        .extents
-                        .end
-                        .height
-                        .min(window_client_area.height as u32),
-                }
-            };
-            let image_count = if present_mode == PresentMode::Mailbox {
-                (caps.image_count.end - 1).min(3)
-            } else {
-                (caps.image_count.end - 1).min(2)
-            };
-            let image_layers = 1;
-            let image_usage = if caps.usage.contains(Usage::COLOR_ATTACHMENT) {
-                Usage::COLOR_ATTACHMENT
-            } else {
-                Err("The Surface isn't capable of supporting color!")?
-            };
-            let swapchain_config = SwapchainConfig {
-                present_mode,
-                composite_alpha,
-                format,
-                extent,
-                image_count,
-                image_layers,
-                image_usage,
-            };
-            info!("{:?}", swapchain_config);
-            //
-            let (swapchain, backbuffer) = unsafe {
-                device
-                    .create_swapchain(&mut surface, swapchain_config, None)
-                    .map_err(|_| "Failed to create the swapchain!")?
-            };
-            (swapchain, extent, backbuffer, format, image_count as usize)
-        };
-
-        // Create Our Sync Primitives
-        let (image_available_semaphores, render_finished_semaphores, in_flight_fences) = {
-            let mut image_available_semaphores: Vec<<back::Backend as Backend>::Semaphore> = vec![];
-            let mut render_finished_semaphores: Vec<<back::Backend as Backend>::Semaphore> = vec![];
-            let mut in_flight_fences: Vec<<back::Backend as Backend>::Fence> = vec![];
-            for _ in 0..frames_in_flight {
-                in_flight_fences.push(
-                    device
-                        .create_fence(true)
-                        .map_err(|_| "Could not create a fence!")?,
-                );
-                image_available_semaphores.push(
-                    device
-                        .create_semaphore()
-                        .map_err(|_| "Could not create a semaphore!")?,
-                );
-                render_finished_semaphores.push(
-                    device
-                        .create_semaphore()
-                        .map_err(|_| "Could not create a semaphore!")?,
-                );
-            }
-            (
-                image_available_semaphores,
-                render_finished_semaphores,
-                in_flight_fences,
-            )
-        };
-
-        // Define A RenderPass
-        let render_pass = {
-            let color_attachment = Attachment {
-                format: Some(format),
-                samples: 1,
-                ops: AttachmentOps {
-                    load: AttachmentLoadOp::Clear,
-                    store: AttachmentStoreOp::Store,
-                },
-                stencil_ops: AttachmentOps::DONT_CARE,
-                layouts: Layout::Undefined..Layout::Present,
-            };
-            let subpass = SubpassDesc {
-                colors: &[(0, Layout::ColorAttachmentOptimal)],
-                depth_stencil: None,
-                inputs: &[],
-                resolves: &[],
-                preserves: &[],
-            };
-            unsafe {
-                device
-                    .create_render_pass(&[color_attachment], &[subpass], &[])
-                    .map_err(|_| "Couldn't create a render pass!")?
-            }
-        };
-
-        // Create The ImageViews
-        let image_views: Vec<_> = match backbuffer {
-            Backbuffer::Images(images) => images
-                .into_iter()
-                .map(|image| unsafe {
-                    device
-                        .create_image_view(
-                            &image,
-                            ViewKind::D2,
-                            format,
-                            Swizzle::NO,
-                            SubresourceRange {
-                                aspects: Aspects::COLOR,
-                                levels: 0..1,
-                                layers: 0..1,
-                            },
-                        )
-                        .map_err(|_| "Couldn't create the image_view for the image!")
-                })
-                .collect::<Result<Vec<_>, &str>>()?,
-            Backbuffer::Framebuffer(_) => unimplemented!("Can't handle framebuffer backbuffer!"),
-        };
-
-        // Create Our FrameBuffers
-        let framebuffers: Vec<<back::Backend as Backend>::Framebuffer> = {
-            image_views
-                .iter()
-                .map(|image_view| unsafe {
-                    device
-                        .create_framebuffer(
-                            &render_pass,
-                            vec![image_view],
-                            Extent {
-                                width: extent.width as u32,
-                                height: extent.height as u32,
-                                depth: 1,
-                            },
-                        )
-                        .map_err(|_| "Failed to create a framebuffer!")
-                })
-                .collect::<Result<Vec<_>, &str>>()?
-        };
-
-        // Create Our CommandPool
-        let mut command_pool = unsafe {
-            device
-                .create_command_pool_typed(&queue_group, CommandPoolCreateFlags::RESET_INDIVIDUAL)
-                .map_err(|_| "Could not create the raw command pool!")?
-        };
-
-        // Create Our CommandBuffers
-        let command_buffers: Vec<_> = framebuffers
-            .iter()
-            .map(|_| command_pool.acquire_command_buffer())
-            .collect();
-
-        // Build our pipeline and vertex buffer
-        let (descriptor_set_layouts, pipeline_layout, graphics_pipeline) =
-            RustTowerDefenseApplication::create_pipeline(&mut device, extent, &render_pass)?;
-        let (buffer, memory, requirements) = unsafe {
-            const F32_XY_TRIANGLE: u64 = (size_of::<f32>() * 2 * 3) as u64;
-            let mut buffer = device
-                .create_buffer(F32_XY_TRIANGLE, BufferUsage::VERTEX)
-                .map_err(|_| "Couldn't create a buffer for the vertices")?;
-            let requirements = device.get_buffer_requirements(&buffer);
-            let memory_type_id = adapter
-                .physical_device
-                .memory_properties()
-                .memory_types
-                .iter()
-                .enumerate()
-                .find(|&(id, memory_type)| {
-                    requirements.type_mask & (1 << id) != 0
-                        && memory_type.properties.contains(Properties::CPU_VISIBLE)
-                })
-                .map(|(id, _)| MemoryTypeId(id))
-                .ok_or("Couldn't find a memory type to support the vertex buffer!")?;
-            let memory = device
-                .allocate_memory(memory_type_id, requirements.size)
-                .map_err(|_| "Couldn't allocate vertex buffer memory")?;
-            device
-                .bind_buffer_memory(&memory, 0, &mut buffer)
-                .map_err(|_| "Couldn't bind the buffer memory!")?;
-            (buffer, memory, requirements)
-        };
-
-        Ok(HalState {
-            requirements,
-            buffer: ManuallyDrop::new(buffer),
-            memory: ManuallyDrop::new(memory),
-            _instance: ManuallyDrop::new(instance),
-            _surface: surface,
-            _adapter: adapter,
-            device: ManuallyDrop::new(device),
-            queue_group,
-            swapchain: ManuallyDrop::new(swapchain),
-            render_area: extent.to_extent().rect(),
-            render_pass: ManuallyDrop::new(render_pass),
-            image_views,
-            framebuffers,
-            command_pool: ManuallyDrop::new(command_pool),
-            command_buffers,
-            image_available_semaphores,
-            render_finished_semaphores,
-            in_flight_fences,
-            frames_in_flight,
-            current_frame: 0,
-            descriptor_set_layouts,
-            pipeline_layout: ManuallyDrop::new(pipeline_layout),
-            graphics_pipeline: ManuallyDrop::new(graphics_pipeline),
-        })
-    }
-    // /// Creates a new instance of the graphics device's state. This maintains
-    // /// everything necessary to set up the rendering pipeline from graphics device
-    // /// to window surface.
-    // unsafe fn init_hal(window: &Window) -> HalState {
-    //     let instance = RustTowerDefenseApplication::create_device_instance();
-    //     let mut adapter = RustTowerDefenseApplication::pick_adapter(&instance);
-    //     let mut surface = RustTowerDefenseApplication::create_surface(&instance, window);
-    //     let (device, command_queues, queue_type, qf_id) =
-    //         RustTowerDefenseApplication::create_device_with_graphics_queues(&mut adapter, &surface);
-    //     let (swapchain, extent, backbuffer, format) =
-    //         RustTowerDefenseApplication::create_swap_chain(&adapter, &device, &mut surface, None);
-    //     let frame_images =
-    //         RustTowerDefenseApplication::create_image_views(backbuffer, format, &device);
-    //     let render_pass = RustTowerDefenseApplication::create_render_pass(&device, Some(format));
-    //     let (descriptor_set_layouts, pipeline_layout, graphics_pipeline) =
-    //         RustTowerDefenseApplication::create_graphics_pipeline(&device, extent, &render_pass);
-    //     let framebuffers = RustTowerDefenseApplication::create_framebuffers(
-    //         &device,
-    //         &render_pass,
-    //         &frame_images,
-    //         extent,
-    //     );
-    //     let mut command_pool =
-    //         RustTowerDefenseApplication::create_command_pool(&device, queue_type, qf_id);
-    //     let command_buffers = RustTowerDefenseApplication::create_command_buffers(
-    //         &mut command_pool,
-    //         &render_pass,
-    //         &framebuffers,
-    //         extent,
-    //         &graphics_pipeline,
-    //     );
-    //     let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
-    //         RustTowerDefenseApplication::create_sync_objects(&device);
-
-    //     HalState {
-    //         requirements,
-    //         buffer: ManuallyDrop::new(buffer),
-    //         memory: ManuallyDrop::new(memory),
-    //         in_flight_fences,
-    //         render_finished_semaphores,
-    //         image_available_semaphores,
-    //         command_buffers,
-    //         command_pool,
-    //         framebuffers,
-    //         graphics_pipeline,
-    //         descriptor_set_layouts,
-    //         pipeline_layout,
-    //         render_pass,
-    //         frame_images,
-    //         _format: format,
-    //         swapchain,
-    //         command_queues,
-    //         device,
-    //         _surface: surface,
-    //         _adapter: adapter,
-    //         _instance: instance,
-    //     }
-    // }
-
-    /// Finds the queue families supported by an Adapter, and returns
-    /// the results in a QueueFamilyIds struct.
-    fn find_queue_families(adapter: &Adapter<back::Backend>) -> QueueFamilyIds {
-        let mut queue_family_ids = QueueFamilyIds::default();
-
-        for queue_family in &adapter.queue_families {
-            if queue_family.max_queues() > 0 && queue_family.supports_graphics() {
-                queue_family_ids.graphics_family = Some(queue_family.id());
-            }
-
-            if queue_family_ids.is_complete() {
-                break;
-            }
-        }
-
-        queue_family_ids
-    }
-
-    /// Returns true if the adapter supports the necessary queue families
-    /// for the application.
-    fn is_adapter_suitable(adapter: &Adapter<back::Backend>) -> bool {
-        RustTowerDefenseApplication::find_queue_families(adapter).is_complete()
-    }
-
-    /// Iterate every display adapter available to the display backend
-    /// and select the first suitable adapter.
-    fn pick_adapter(instance: &back::Instance) -> Adapter<back::Backend> {
-        let adapters = instance.enumerate_adapters();
-        for adapter in adapters {
-            if RustTowerDefenseApplication::is_adapter_suitable(&adapter) {
-                return adapter;
-            }
-        }
-        panic!("No suitable adapter");
-    }
-
-    /// Creates the swapchain, which represents a queue of images waiting to
-    /// be presented to the screen.
-    fn create_swap_chain(
-        adapter: &Adapter<back::Backend>,
-        device: &<back::Backend as Backend>::Device,
-        surface: &mut <back::Backend as Backend>::Surface,
-        previous_swapchain: Option<<back::Backend as Backend>::Swapchain>,
-    ) -> (
-        <back::Backend as Backend>::Swapchain,
-        window::Extent2D,
-        Backbuffer<back::Backend>,
-        format::Format,
-    ) {
-        let (caps, formats, _present_modes, _composite_alphas) =
-            surface.compatibility(&adapter.physical_device);
-
-        // SRGB has "more accurate perceived colors", but
-        // working directly with SRGB is annoying, so we map from RGB to SRGB.
-        let format = formats.map_or(format::Format::Rgba8Srgb, |formats| {
-            formats
-                .iter()
-                .find(|format| format.base_format().1 == format::ChannelType::Srgb)
-                .map(|format| *format)
-                .unwrap_or(formats[0])
-        });
-
-        // what should default extent be?
-        let swap_config = SwapchainConfig::from_caps(&caps, format, caps.extents.end);
-        let extent = swap_config.extent;
-        let (swapchain, backbuffer) = unsafe {
-            device
-                .create_swapchain(surface, swap_config, previous_swapchain)
-                .unwrap()
-        };
-
-        (swapchain, extent, backbuffer, format)
-    }
-
-    /// An image view is quite literally a view into an image. It describes how to
-    /// access the image and which part of the image to access, for example if it
-    /// should be treated as a 2D texture depth texture without any mipmapping levels.
-    ///
-    /// Creates a basic image view for every image in the swap chain's backbuffer so
-    /// that we can use them as color targets later on.
-    /// https://vulkan-tutorial.com/Drawing_a_triangle/Presentation/Image_views
-    unsafe fn create_image_views(
-        backbuffer: Backbuffer<back::Backend>,
-        format: format::Format,
-        device: &<back::Backend as Backend>::Device,
-    ) -> Vec<(
-        <back::Backend as Backend>::Image,
-        <back::Backend as Backend>::ImageView,
-    )> {
-        match backbuffer {
-            window::Backbuffer::Images(images) => images
-                .into_iter()
-                .map(|image| {
-                    let image_view = match device.create_image_view(
-                        &image,
-                        ViewKind::D2,
-                        format,
-                        format::Swizzle::NO,
-                        SubresourceRange {
-                            aspects: format::Aspects::COLOR,
-                            levels: 0..1,
-                            layers: 0..1,
-                        },
-                    ) {
-                        Ok(image_view) => image_view,
-                        Err(_) => panic!("Error creating image view for an image!"),
-                    };
-
-                    (image, image_view)
-                })
-                .collect(),
-            // OpenGL case, where backbuffer is a framebuffer, not implemented currently
-            _ => unimplemented!(),
-        }
-    }
-
     /// Gets the compiled shader code from the SHADER_DIR
     pub fn get_shader_code(shader_name: &str) -> Result<ShaderData, Box<dyn Error>> {
         // I will probably want to use some human-readable JSON config for top-level
@@ -1311,61 +803,6 @@ impl RustTowerDefenseApplication {
         shader_file.read_to_end(&mut shader_data)?;
 
         Ok(shader_data)
-    }
-
-    /// Creates the RenderPass.
-    /// Before we can finish creating the pipeline, we need to tell Vulkan about
-    /// the framebuffer attachments that will be used while rendering. We need to
-    /// specify how many color and depth buffers there will be, how many samples to
-    /// use for each of them and how their contents should be handled throughout the
-    /// rendering operations. All of this information is wrapped in a render pass object.
-    fn create_render_pass(
-        device: &<back::Backend as Backend>::Device,
-        format: Option<format::Format>,
-    ) -> <back::Backend as Backend>::RenderPass {
-        // we're not doing anything with multisampling yet, so we'll stick to 1 sample.
-        let samples: u8 = 1;
-
-        let ops = AttachmentOps {
-            load: AttachmentLoadOp::Clear,
-            store: AttachmentStoreOp::Store,
-        };
-
-        let stencil_ops = AttachmentOps::DONT_CARE;
-
-        let layouts = Layout::Undefined..Layout::Present;
-
-        // In our case we'll have just a single color buffer attachment represented by one of the images from the swap chain.
-        let color_attachment = Attachment {
-            format,
-            samples,
-            ops,
-            stencil_ops,
-            layouts,
-        };
-
-        let color_attachment_ref: AttachmentRef = (0, Layout::ColorAttachmentOptimal);
-
-        // hal assumes pipeline bind point is GRAPHICS
-        let subpass = SubpassDesc {
-            colors: &[color_attachment_ref],
-            depth_stencil: None,
-            inputs: &[],
-            resolves: &[],
-            preserves: &[],
-        };
-
-        unsafe {
-            // A single render pass can consist of multiple subpasses. Subpasses are subsequent
-            // rendering operations that depend on the contents of framebuffers in previous passes,
-            // for example a sequence of post-processing effects that are applied one after another.
-            // If you group these rendering operations into one render pass, then Vulkan is able to
-            // reorder the operations and conserve memory bandwidth for possibly better performance.
-            // For our very first triangle, however, we'll stick to a single subpass.
-            device
-                .create_render_pass(&[color_attachment], &[subpass], &[])
-                .unwrap()
-        }
     }
 
     // /// Creates the actual graphics pipeline, consisting of programmable (shader) elements as well
@@ -1727,124 +1164,6 @@ impl RustTowerDefenseApplication {
         Ok((descriptor_set_layouts, pipeline_layout, gfx_pipeline))
     }
 
-    /// Creates the framebuffers and attaches them to the device
-    fn create_framebuffers(
-        device: &<back::Backend as Backend>::Device,
-        render_pass: &<back::Backend as Backend>::RenderPass,
-        frame_images: &[(
-            <back::Backend as Backend>::Image,
-            <back::Backend as Backend>::ImageView,
-        )],
-        extent: window::Extent2D,
-    ) -> Vec<<back::Backend as Backend>::Framebuffer> {
-        let mut framebuffers: Vec<<back::Backend as Backend>::Framebuffer> = Vec::new();
-
-        unsafe {
-            for (_, image_view) in frame_images.iter() {
-                framebuffers.push(
-                    device
-                        .create_framebuffer(
-                            render_pass,
-                            vec![image_view],
-                            Extent {
-                                width: extent.width as _,
-                                height: extent.height as _,
-                                depth: 1,
-                            },
-                        )
-                        .expect("failed to create framebuffer!"),
-                );
-            }
-        }
-
-        framebuffers
-    }
-
-    /// Commands in Vulkan, like drawing operations and memory transfers, are not executed
-    /// directly using function calls. You have to record all of the operations you want to
-    /// perform in command buffer objects. The advantage of this is that all of the hard work
-    /// of setting up the drawing commands can be done in advance and in multiple threads. After
-    /// that, you just have to tell Vulkan to execute the commands in the main loop.
-    unsafe fn create_command_buffers<'a>(
-        command_pool: &'a mut pool::CommandPool<back::Backend, Graphics>,
-        render_pass: &<back::Backend as Backend>::RenderPass,
-        framebuffers: &[<back::Backend as Backend>::Framebuffer],
-        extent: window::Extent2D,
-        pipeline: &<back::Backend as Backend>::GraphicsPipeline,
-    ) -> Vec<command::CommandBuffer<back::Backend, Graphics, command::MultiShot, command::Primary>>
-    {
-        // pre-allocating memory primary command buffers is not necessary: HAL handles automatically
-
-        let mut command_buffers: Vec<
-            command::CommandBuffer<back::Backend, Graphics, command::MultiShot, command::Primary>,
-        > = Vec::new();
-
-        for fb in framebuffers.iter() {
-            // command buffer will be returned in 'recording' state
-            // Shot: how many times a command buffer can be submitted; we want MultiShot (allow submission multiple times)
-            // Level: command buffer type (primary or secondary)
-            let mut command_buffer: command::CommandBuffer<
-                back::Backend,
-                Graphics,
-                command::MultiShot,
-                command::Primary,
-            > = command_pool.acquire_command_buffer();
-
-            // allow_pending_resubmit to be true, per vulkan-tutorial
-            command_buffer.begin(true);
-            command_buffer.bind_graphics_pipeline(pipeline);
-            {
-                // begin render pass
-                let render_area = pso::Rect {
-                    x: 0,
-                    y: 0,
-                    w: extent.width as _,
-                    h: extent.height as _,
-                };
-                let clear_values = vec![command::ClearValue::Color(command::ClearColor::Float([
-                    0.0, 0.0, 0.0, 1.0,
-                ]))];
-
-                let mut render_pass_inline_encoder = command_buffer.begin_render_pass_inline(
-                    render_pass,
-                    fb,
-                    render_area,
-                    clear_values.iter(),
-                );
-                // HAL encoder draw command is best understood by seeing how it expands out:
-                // vertex_count = vertices.end - vertices.start
-                // instance_count = instances.end - instances.start
-                // first_vertex = vertices.start
-                // first_instance = instances.start
-                render_pass_inline_encoder.draw(0..3, 0..1);
-            }
-
-            command_buffer.finish();
-            command_buffers.push(command_buffer);
-        }
-
-        command_buffers
-    }
-
-    /// We have to create a command pool before we can create command buffers.
-    /// Command pools manage the memory that is used to store the buffers and
-    /// command buffers are allocated from them.
-    unsafe fn create_command_pool(
-        device: &<back::Backend as Backend>::Device,
-        queue_type: queue::QueueType,
-        qf_id: queue::family::QueueFamilyId,
-    ) -> pool::CommandPool<back::Backend, Graphics> {
-        // raw command pool: a thin wrapper around command pools
-        // strongly typed command pool: a safe wrapper around command pools, which ensures that only one command buffer is recorded at the same time from the current queue
-        let raw_command_pool = device
-            .create_command_pool(qf_id, pool::CommandPoolCreateFlags::empty())
-            .unwrap();
-
-        // safety check necessary before creating a strongly typed command pool
-        assert_eq!(Graphics::supported_by(queue_type), true);
-        pool::CommandPool::new(raw_command_pool)
-    }
-
     fn do_the_render(&mut self, local_state: &LocalState) -> Result<(), &'static str> {
         let x = ((local_state.mouse_x / local_state.frame_width) * 2.0) - 1.0;
         let y = ((local_state.mouse_y / local_state.frame_height) * 2.0) - 1.0;
@@ -1884,6 +1203,11 @@ impl RustTowerDefenseApplication {
             }
             if inputs.new_frame_size.is_some() {
                 debug!("Window changed size, restarting HalState...");
+                // XXX This actually isn't a great implementation, we want to keep
+                // what state we can, but this is easier to implement.
+                //let hal_state = HalState::new(&self.window_state.window).unwrap();
+                //drop(self.hal_state);
+                //mem::replace(&mut self.hal_state, hal_state);
                 drop(self.hal_state);
                 self.hal_state = HalState::new(&self.window_state.window).unwrap();
             }
@@ -1891,6 +1215,11 @@ impl RustTowerDefenseApplication {
             if let Err(e) = self.do_the_render(&local_state) {
                 error!("Rendering Error: {:?}", e);
                 debug!("Auto-restarting HalState...");
+                // XXX This actually isn't a great implementation, we want to keep
+                // what state we can, but this is easier to implement.
+                // let hal_state = HalState::new(&self.window_state.window).unwrap();
+                // let hal_state = mem::replace(&mut self.hal_state, hal_state);
+                // drop(hal_state);
                 drop(self.hal_state);
                 self.hal_state = HalState::new(&self.window_state.window).unwrap();
             }
