@@ -24,41 +24,39 @@ extern crate glsl_to_spirv;
 extern crate winit;
 
 use std::borrow::BorrowMut;
-use std::cell::{RefCell, RefMut};
+use std::cell::RefCell;
 use std::error::Error;
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::mem;
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 
-use crate::graphics::hal::Capability;
 use arrayvec::ArrayVec;
 use core::mem::{size_of, ManuallyDrop};
 use hal::{
     adapter::{Adapter, MemoryTypeId, PhysicalDevice},
     buffer::Usage as BufferUsage,
-    command::{self, ClearColor, ClearValue, CommandBuffer, MultiShot, Primary},
+    command::{ClearColor, ClearValue, CommandBuffer, MultiShot, Primary},
     device::Device,
-    format::{self, Aspects, ChannelType, Format, Swizzle},
+    format::{Aspects, ChannelType, Format, Swizzle},
     image::{Extent, Layout, SubresourceRange, Usage, ViewKind},
     memory::{Properties, Requirements},
     pass::{
-        Attachment, AttachmentLoadOp, AttachmentOps, AttachmentRef, AttachmentStoreOp, Subpass,
+        Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp, Subpass,
         SubpassDesc,
     },
-    pool::{self, CommandPool, CommandPoolCreateFlags},
+    pool::{CommandPool, CommandPoolCreateFlags},
     pso::{
-        self, AttributeDesc, BakedStates, BasePipeline, BlendDesc, BlendOp, BlendState,
+        AttributeDesc, BakedStates, BasePipeline, BlendDesc, BlendOp, BlendState,
         ColorBlendDesc, ColorMask, DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding,
         Element, EntryPoint, Face, Factor, FrontFace, GraphicsPipelineDesc, GraphicsShaderSet,
         InputAssemblerDesc, LogicOp, PipelineCreationFlags, PipelineStage, PolygonMode, Rasterizer,
         Rect, ShaderStageFlags, Specialization, StencilTest, VertexBufferDesc, Viewport,
     },
     queue::{self, family::QueueGroup, Submission},
-    window::{self, Backbuffer, Extent2D, FrameSync, PresentMode, Swapchain, SwapchainConfig},
+    window::{Backbuffer, Extent2D, FrameSync, PresentMode, Swapchain, SwapchainConfig},
     Backend, Gpu, Graphics, Instance, Primitive, QueueFamily, Surface,
 };
-use winit::{dpi, ControlFlow, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
+use winit::{dpi, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 //use log::Level;
 
@@ -99,10 +97,8 @@ pub fn run() {
     // see: https://docs.rs/env_logger/0.5.13/env_logger/
     env_logger::init();
     info!("Starting the application!");
-    let mut application = RustTowerDefenseApplication::init();
+    let application = RustTowerDefenseApplication::init();
     application.run();
-    //info!("Cleaning up the application!");
-    //drop(application);
 }
 
 /// Holds configuration flags for the window.
@@ -231,7 +227,7 @@ impl HalState {
             let queue_group = queues
                 .take::<Graphics>(queue_family.id())
                 .ok_or("Couldn't take ownership of the QueueGroup!")?;
-            if queue_group.queues.len() > 0 {
+            if !queue_group.queues.is_empty() {
                 Ok(())
             } else {
                 Err("The QueueGroup did not have any CommandQueues available!")
@@ -575,36 +571,36 @@ impl HalState {
 
 #[derive(Debug, Clone)]
 pub enum UserInput {
-    noop,
-    end_requested,
-    new_frame_size(Option<(f64, f64)>),
-    new_mouse_position(Option<(f64, f64)>),
-    keypress(u32),
+    Noop,
+    EndRequested,
+    NewFrameSize(Option<(f64, f64)>),
+    NewMousePosition(Option<(f64, f64)>),
+    Keypress(u32),
     // pub keypress: winit::VirtualKeyCode,
 }
 
 impl UserInput {
     pub fn poll_events_loop(events_loop: &mut EventsLoop) -> Option<Self> {
-        let mut output = UserInput::noop;
+        let mut output = UserInput::Noop;
         // let mut output = UserInput::default();
         events_loop.poll_events(|event| match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                output = UserInput::end_requested;
+                output = UserInput::EndRequested;
             }
             Event::WindowEvent {
                 event: WindowEvent::Resized(logical),
                 ..
             } => {
-                output = UserInput::new_frame_size(Some((logical.width, logical.height)));
+                output = UserInput::NewFrameSize(Some((logical.width, logical.height)));
             }
             Event::WindowEvent {
                 event: WindowEvent::CursorMoved { position, .. },
                 ..
             } => {
-                output = UserInput::new_mouse_position(Some((position.x, position.y)));
+                output = UserInput::NewMousePosition(Some((position.x, position.y)));
             }
             Event::WindowEvent { event, .. } => (),
             _ => (),
@@ -631,7 +627,7 @@ impl UserInput {
             // _ => UserInput::noop,
         });
         match output {
-            UserInput::noop => None,
+            UserInput::Noop => None,
             r => Some(r),
         }
     }
@@ -649,11 +645,11 @@ impl LocalState {
     pub fn update_from_input(&mut self, input: UserInput) {
         debug!("update_from_input");
         match input {
-            UserInput::new_frame_size(Some(frame_size)) => {
+            UserInput::NewFrameSize(Some(frame_size)) => {
                 self.frame_width = frame_size.0;
                 self.frame_height = frame_size.1;
             }
-            UserInput::new_mouse_position(Some(position)) => {
+            UserInput::NewMousePosition(Some(position)) => {
                 self.mouse_x = position.0;
                 self.mouse_y = position.1;
             }
@@ -1213,10 +1209,10 @@ impl RustTowerDefenseApplication {
         loop {
             let inputs = UserInput::poll_events_loop(&mut events_loop);
             match inputs {
-                Some(UserInput::end_requested) => {
+                Some(UserInput::EndRequested) => {
                     break;
                 }
-                Some(UserInput::new_frame_size(_)) => {
+                Some(UserInput::NewFrameSize(_)) => {
                     debug!("Window changed size, restarting HalState...");
                     // XXX This actually isn't a great implementation, we want to keep
                     // what state we can, but this is easier to implement.
