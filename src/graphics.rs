@@ -23,12 +23,12 @@ extern crate log;
 extern crate glsl_to_spirv;
 extern crate winit;
 
-use std::mem;
 use std::borrow::BorrowMut;
 use std::cell::{RefCell, RefMut};
 use std::error::Error;
 use std::fs::File;
 use std::io::{self, Read, Write};
+use std::mem;
 use std::path::{Path, PathBuf};
 
 use crate::graphics::hal::Capability;
@@ -573,57 +573,69 @@ impl HalState {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct UserInput {
-    pub end_requested: bool,
-    pub new_frame_size: Option<(f64, f64)>,
-    pub new_mouse_position: Option<(f64, f64)>,
+#[derive(Debug, Clone)]
+pub enum UserInput {
+    noop,
+    end_requested,
+    new_frame_size(Option<(f64, f64)>),
+    new_mouse_position(Option<(f64, f64)>),
+    keypress(u32),
+    // pub keypress: winit::VirtualKeyCode,
 }
 
 impl UserInput {
-    pub fn poll_events_loop(events_loop: &mut EventsLoop) -> Self {
-        let mut output = UserInput::default();
+    pub fn poll_events_loop(events_loop: &mut EventsLoop) -> Option<Self> {
+        let mut output = UserInput::noop;
+        // let mut output = UserInput::default();
         events_loop.poll_events(|event| match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
-            } => output.end_requested = true,
+            } => {
+                output = UserInput::end_requested;
+            },
             Event::WindowEvent {
                 event: WindowEvent::Resized(logical),
                 ..
             } => {
-                output.new_frame_size = Some((logical.width, logical.height));
-            }
+                output = UserInput::new_frame_size(Some((logical.width, logical.height)));
+            },
             Event::WindowEvent {
                 event: WindowEvent::CursorMoved { position, .. },
                 ..
             } => {
-                output.new_mouse_position = Some((position.x, position.y));
+                output = UserInput::new_mouse_position(Some((position.x, position.y)));
             },
             Event::WindowEvent {
                 event, ..
-            } => match event {
-                WindowEvent::KeyboardInput {
-                    input:
-                        winit::KeyboardInput {
-                            virtual_keycode: Some(virtual_code),
-                            state,
-                            ..
-                        },
-                    ..
-                } => match (virtual_code, state) {
-                    (winit::VirtualKeyCode::Escape, _) => {
-                        debug!("ESC");
-                    }
-                    _ => {
-                        debug!("Keypress: {:#?}", virtual_code);
-                    },
-                }
-                _ => (),
-            }
+            } => (),
             _ => (),
+            // } => match event {
+            //     WindowEvent::KeyboardInput {
+            //         input:
+            //             winit::KeyboardInput {
+            //                 virtual_keycode: Some(virtual_code),
+            //                 state,
+            //                 ..
+            //             },
+            //         ..
+            //     } => match (virtual_code, state) {
+            //         (winit::VirtualKeyCode::Escape, _) => {
+            //             debug!("ESC");
+            //         },
+            //         _ => {
+            //             debug!("Keypress: {:#?}", virtual_code);
+            //             Some(UserInput::keypress(1))
+            //         }
+            //     }
+            //     // _ => (),
+            // }
+            // _ => UserInput::noop,
         });
-        output
+        match output {
+            UserInput::noop => None,
+            r => Some(r),
+        }
     }
 }
 
@@ -637,14 +649,18 @@ pub struct LocalState {
 
 impl LocalState {
     pub fn update_from_input(&mut self, input: UserInput) {
-        if let Some(frame_size) = input.new_frame_size {
-            self.frame_width = frame_size.0;
-            self.frame_height = frame_size.1;
-        }
-        if let Some(position) = input.new_mouse_position {
-            self.mouse_x = position.0;
-            self.mouse_y = position.1;
-        }
+        debug!("update_from_input");
+        match input {
+            UserInput::new_frame_size(Some(frame_size)) => {
+                self.frame_width = frame_size.0;
+                self.frame_height = frame_size.1;
+            },
+            UserInput::new_mouse_position(Some(position)) => {
+                self.mouse_x = position.0;
+                self.mouse_y = position.1;
+            },
+            _ => (),
+        };
     }
 }
 
@@ -1198,20 +1214,26 @@ impl RustTowerDefenseApplication {
 
         loop {
             let inputs = UserInput::poll_events_loop(&mut events_loop);
-            if inputs.end_requested {
-                break;
-            }
-            if inputs.new_frame_size.is_some() {
-                debug!("Window changed size, restarting HalState...");
-                // XXX This actually isn't a great implementation, we want to keep
-                // what state we can, but this is easier to implement.
-                //let hal_state = HalState::new(&self.window_state.window).unwrap();
-                //drop(self.hal_state);
-                //mem::replace(&mut self.hal_state, hal_state);
-                drop(self.hal_state);
-                self.hal_state = HalState::new(&self.window_state.window).unwrap();
-            }
-            local_state.update_from_input(inputs);
+            match inputs {
+                Some(UserInput::end_requested) => {
+                    break;
+                }
+                Some(UserInput::new_frame_size(_)) => {
+                    debug!("Window changed size, restarting HalState...");
+                    // XXX This actually isn't a great implementation, we want to keep
+                    // what state we can, but this is easier to implement.
+                    //let hal_state = HalState::new(&self.window_state.window).unwrap();
+                    //drop(self.hal_state);
+                    //mem::replace(&mut self.hal_state, hal_state);
+                    local_state.update_from_input(inputs.unwrap());
+                    drop(self.hal_state);
+                    self.hal_state = HalState::new(&self.window_state.window).unwrap();
+                }
+                Some(r) => {
+                    local_state.update_from_input(r);
+                }
+                None => ()
+            };
             if let Err(e) = self.do_the_render(&local_state) {
                 error!("Rendering Error: {:?}", e);
                 debug!("Auto-restarting HalState...");
