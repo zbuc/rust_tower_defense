@@ -29,6 +29,7 @@ use std::error::Error;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::{Path};
+use std::thread;
 
 use arrayvec::ArrayVec;
 use core::mem::{size_of, ManuallyDrop};
@@ -186,6 +187,7 @@ impl core::ops::Drop for HalState {
                 .destroy_render_pass(ManuallyDrop::into_inner(read(&self.render_pass)));
             self.device
                 .destroy_swapchain(ManuallyDrop::into_inner(read(&self.swapchain)));
+            self.command_buffers = vec![];
             ManuallyDrop::drop(&mut self.device);
             ManuallyDrop::drop(&mut self._instance);
         }
@@ -252,6 +254,7 @@ impl HalState {
                     .find(|pm| present_modes.contains(pm))
                     .ok_or("No PresentMode values specified!")?
             };
+
             let composite_alpha = {
                 use gfx_hal::window::CompositeAlpha::*;
                 [Opaque, Inherit, PreMultiplied, PostMultiplied]
@@ -299,6 +302,7 @@ impl HalState {
             } else {
                 Err("The Surface isn't capable of supporting color!")?
             };
+            debug!("Present mode: {:#?}", present_mode);
             let swapchain_config = SwapchainConfig {
                 present_mode,
                 composite_alpha,
@@ -487,6 +491,8 @@ impl HalState {
     }
 
     pub fn draw_triangle_frame(&mut self, triangle: Triangle) -> Result<(), &'static str> {
+        let tid = thread::current().id();
+        debug!("thread id (draw_triangle_frame): {:#?}", tid);
         // SETUP FOR THIS FRAME
         let image_available = &self.image_available_semaphores[self.current_frame];
         let render_finished = &self.render_finished_semaphores[self.current_frame];
@@ -564,7 +570,10 @@ impl HalState {
             the_command_queue.submit(submission, Some(flight_fence));
             self.swapchain
                 .present(the_command_queue, i_u32, present_wait_semaphores)
-                .map_err(|_| "Failed to present into the swapchain!")
+                .map_err(|e| {
+                    debug!("Failed to present into the swapchain: {:#?}", e);
+                    "Failed to present into the swapchain!"
+                })
         }
     }
 }
@@ -733,10 +742,12 @@ impl RustTowerDefenseApplication {
 
             // Prompt for monitor when using native fullscreen
             if !macos_use_simple_fullscreen {
+                debug!("No simple fullscreen");
                 Some(RustTowerDefenseApplication::prompt_for_monitor(
                     &events_loop,
                 ))
             } else {
+                debug!("Yes simple fullscreen");
                 None
             }
         }
@@ -776,21 +787,25 @@ impl RustTowerDefenseApplication {
     /// ## Failure
     /// It's possible for the window creation to fail.
     fn init_window() -> WindowState {
+        let tid = thread::current().id();
+        debug!("thread ID (init_window) {:#?}", tid);
         let events_loop = EventsLoop::new();
 
         let monitor = RustTowerDefenseApplication::get_monitor(&events_loop);
 
-        let is_fullscreen = monitor.is_some();
-
+        debug!("Monitor: {:#?}", monitor);
         let window_builder = WindowBuilder::new()
             .with_fullscreen(monitor)
             .with_dimensions(dpi::LogicalSize::new(1024., 768.))
+            .with_resizable(false)
             .with_title(WINDOW_NAME.to_string());
         let window = window_builder.build(&events_loop).unwrap();
+        window.set_maximized(true);
+        window.set_fullscreen(Some(window.get_current_monitor()));
 
         let window_config = RefCell::new(WindowConfig {
             is_fullscreen: false,
-            is_maximized: false,
+            is_maximized: true,
             decorations: true,
             #[cfg(target_os = "macos")]
             macos_use_simple_fullscreen: false,
@@ -1220,6 +1235,8 @@ impl RustTowerDefenseApplication {
                     //drop(self.hal_state);
                     //mem::replace(&mut self.hal_state, hal_state);
                     local_state.update_from_input(inputs.unwrap());
+                    let tid = thread::current().id();
+                    debug!("thread ID (events_loop1) {:#?}", tid);
                     drop(self.hal_state);
                     self.hal_state = HalState::new(&self.window_state.window).unwrap();
                 }
@@ -1236,6 +1253,8 @@ impl RustTowerDefenseApplication {
                 // let hal_state = HalState::new(&self.window_state.window).unwrap();
                 // let hal_state = mem::replace(&mut self.hal_state, hal_state);
                 // drop(hal_state);
+                let tid = thread::current().id();
+                debug!("thread ID (events_loop2, err) {:#?}", tid);
                 drop(self.hal_state);
                 self.hal_state = HalState::new(&self.window_state.window).unwrap();
             }

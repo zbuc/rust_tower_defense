@@ -34,8 +34,7 @@ optional = true
 [target.'cfg(any(target_os = "macos", all(target_os = "ios", target_arch = "aarch64")))'.dependencies.gfx-backend-metal]
 optional = true
 version = "0.1"
-#rev = "c16898e3"
-#git = "https://github.com/gfx-rs/gfx"
+#path = "../gfx/src/backend/metal/"
 
 [target.'cfg(windows)'.dependencies.gfx-backend-dx12]
 optional = true
@@ -45,8 +44,7 @@ version = "0.1"
 
 [dependencies.gfx-hal]
 version = "0.1"
-#git = "https://github.com/gfx-rs/gfx"
-#rev = "c16898e3"
+#path = "../gfx/src/hal"
 
 [build-dependencies]
 glsl-to-spirv = "=0.1.7"
