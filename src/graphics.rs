@@ -48,7 +48,7 @@ use hal::{
         ColorMask, DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding, Element, EntryPoint,
         Face, Factor, FrontFace, GraphicsPipelineDesc, GraphicsShaderSet, InputAssemblerDesc,
         LogicOp, PipelineCreationFlags, PipelineStage, PolygonMode, Rasterizer, Rect,
-        ShaderStageFlags, Specialization, StencilTest, VertexBufferDesc, Viewport,
+        ShaderStageFlags, Specialization, StencilTest, VertexBufferDesc, VertexInputRate, Viewport,
     },
     queue::{self, family::QueueGroup, Submission},
     window::{Backbuffer, Extent2D, FrameSync, PresentMode, Swapchain, SwapchainConfig},
@@ -219,15 +219,20 @@ impl HalState {
                 .iter()
                 .find(|qf| qf.supports_graphics() && surface.supports_queue_family(qf))
                 .ok_or("Couldn't find a QueueFamily with graphics!")?;
-            let Gpu { device, mut queues } = unsafe {
-                adapter
-                    .physical_device
-                    .open(&[(&queue_family, &[1.0; 1])])
-                    .map_err(|_| "Couldn't open the PhysicalDevice!")?
-            };
-            let queue_group = queues
-                .take::<Graphics>(queue_family.id())
-                .ok_or("Couldn't take ownership of the QueueGroup!")?;
+
+            let (device, mut queue_group) = adapter
+                .open_with::<_, hal::Graphics>(1, |queue_family| surface.supports_queue_family(queue_family))
+                .unwrap();
+
+            // let Gpu { device, mut queues } = unsafe {
+            //     adapter
+            //         .physical_device
+            //         .open(&[(&queue_family, &[1.0; 1])])
+            //         .map_err(|_| "Couldn't open the PhysicalDevice!")?
+            // };
+            // let queue_group = queues
+            //     .take::<Graphics>(queue_family.id())
+            //     .ok_or("Couldn't take ownership of the QueueGroup!")?;
             if !queue_group.queues.is_empty() {
                 Ok(())
             } else {
@@ -447,12 +452,12 @@ impl HalState {
         ),
         &'static str,
     > {
-        let (caps, preferred_formats, present_modes, composite_alphas) =
+        let (caps, preferred_formats, present_modes) =
             surface.compatibility(&adapter.physical_device);
         info!("{:?}", caps);
         info!("Preferred Formats: {:?}", preferred_formats);
         info!("Present Modes: {:?}", present_modes);
-        info!("Composite Alphas: {:?}", composite_alphas);
+        //info!("Composite Alphas: {:?}", composite_alphas);
         //
         let present_mode = {
             use gfx_hal::window::PresentMode::*;
@@ -463,14 +468,15 @@ impl HalState {
                 .ok_or("No PresentMode values specified!")?
         };
 
-        let composite_alpha = {
-            use gfx_hal::window::CompositeAlpha::*;
-            [Opaque, Inherit, PreMultiplied, PostMultiplied]
-                .iter()
-                .cloned()
-                .find(|ca| composite_alphas.contains(ca))
-                .ok_or("No CompositeAlpha values specified!")?
-        };
+        // XXX TODO figure out composite alpha
+        // let composite_alpha = {
+        //     use hal::CompositeAlpha;
+        //     [CompositeAlpha::Opaque, CompositeAlpha::Inherit, CompositeAlpha::PreMultiplied, CompositeAlpha::PostMultiplied]
+        //         .iter()
+        //         .cloned()
+        //         .find(|ca| composite_alphas.contains(ca))
+        //         .ok_or("No CompositeAlpha values specified!")?
+        // };
         let format = match preferred_formats {
             None => Format::Rgba8Srgb,
             Some(formats) => match formats
@@ -511,15 +517,16 @@ impl HalState {
             Err("The Surface isn't capable of supporting color!")?
         };
         debug!("Present mode: {:#?}", present_mode);
-        let swapchain_config = SwapchainConfig {
-            present_mode,
-            composite_alpha,
-            format,
-            extent,
-            image_count,
-            image_layers,
-            image_usage,
-        };
+        let swapchain_config = SwapchainConfig::from_caps(&caps, format, extent);
+        // let swapchain_config = SwapchainConfig {
+        //     present_mode,
+        //     //composite_alpha,
+        //     format,
+        //     extent,
+        //     image_count,
+        //     image_layers,
+        //     image_usage,
+        // };
         info!("{:?}", swapchain_config);
         //
         let (swapchain, backbuffer) = unsafe {
@@ -1123,7 +1130,7 @@ impl RustTowerDefenseApplication {
             let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
                 binding: 0,
                 stride: (size_of::<f32>() * 2) as u32,
-                rate: 0,
+                rate: VertexInputRate::Instance(0),
             }];
             let attributes: Vec<AttributeDesc> = vec![AttributeDesc {
                 location: 0,
@@ -1287,7 +1294,7 @@ impl RustTowerDefenseApplication {
                 None => (),
             };
             if let Err(e) = self.do_the_render(&local_state) {
-                error!("Rendering Error: {:?}", e);
+                debug!("Rendering Error: {:?}", e);
                 debug!("Auto-restarting HalState...");
                 // XXX This actually isn't a great implementation, we want to keep
                 // what state we can, but this is easier to implement.
@@ -1302,10 +1309,10 @@ impl RustTowerDefenseApplication {
             }
 
             if self.hal_state.should_recreate_swapchain {
-                error!("Have to recreate swapchain...");
+                debug!("Have to recreate swapchain...");
                 self.hal_state.device.wait_idle().unwrap();
 
-                let (caps, formats, _present_modes, _) = self
+                let (caps, formats, _present_modes) = self
                     .hal_state
                     .surface
                     .compatibility(&mut self.hal_state.adapter.physical_device);
