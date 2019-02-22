@@ -1130,7 +1130,7 @@ impl RustTowerDefenseApplication {
             let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
                 binding: 0,
                 stride: (size_of::<f32>() * 2) as u32,
-                rate: VertexInputRate::Instance(0),
+                rate: VertexInputRate::Vertex,
             }];
             let attributes: Vec<AttributeDesc> = vec![AttributeDesc {
                 location: 0,
