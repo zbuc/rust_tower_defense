@@ -221,7 +221,9 @@ impl HalState {
                 .ok_or("Couldn't find a QueueFamily with graphics!")?;
 
             let (device, mut queue_group) = adapter
-                .open_with::<_, hal::Graphics>(1, |queue_family| surface.supports_queue_family(queue_family))
+                .open_with::<_, hal::Graphics>(1, |queue_family| {
+                    surface.supports_queue_family(queue_family)
+                })
                 .unwrap();
 
             // let Gpu { device, mut queues } = unsafe {
@@ -671,7 +673,7 @@ impl UserInput {
                 } => match (virtual_code, state) {
                     (winit::VirtualKeyCode::Escape, _) => {
                         output = UserInput::EndRequested;
-                    },
+                    }
                     _ => (),
                 },
                 _ => (),
