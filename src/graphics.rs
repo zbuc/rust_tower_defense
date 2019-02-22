@@ -137,9 +137,11 @@ struct HalState {
     queue_group: QueueGroup<back::Backend, Graphics>,
     swapchain: ManuallyDrop<<back::Backend as Backend>::Swapchain>,
     device: ManuallyDrop<back::Device>,
-    _adapter: Adapter<back::Backend>,
-    _surface: <back::Backend as Backend>::Surface,
+    adapter: Adapter<back::Backend>,
+    surface: <back::Backend as Backend>::Surface,
     _instance: ManuallyDrop<back::Instance>,
+    should_recreate_swapchain: bool,
+    format: Format,
 }
 
 impl core::ops::Drop for HalState {
@@ -384,8 +386,8 @@ impl HalState {
             buffer: ManuallyDrop::new(buffer),
             memory: ManuallyDrop::new(memory),
             _instance: ManuallyDrop::new(instance),
-            _surface: surface,
-            _adapter: adapter,
+            surface: surface,
+            adapter: adapter,
             device: ManuallyDrop::new(device),
             queue_group,
             swapchain: ManuallyDrop::new(swapchain),
@@ -403,7 +405,31 @@ impl HalState {
             descriptor_set_layouts,
             pipeline_layout: ManuallyDrop::new(pipeline_layout),
             graphics_pipeline: ManuallyDrop::new(graphics_pipeline),
+            should_recreate_swapchain: false,
+            format: format,
         })
+    }
+
+    pub unsafe fn cleanup_framebuffers(&mut self) {
+        for framebuffer in self.framebuffers.drain(..) {
+            self.device.destroy_framebuffer(framebuffer);
+        }
+        for rtv in self.image_views.drain(..) {
+            self.device.destroy_image_view(rtv);
+        }
+    }
+
+    pub fn recreate_swapchain(&mut self) {
+        // vkDeviceWaitIdle(device);
+
+        // cleanupSwapChain();
+
+        // createSwapChain();
+        // createImageViews();
+        // createRenderPass();
+        // createGraphicsPipeline();
+        // createFramebuffers();
+        // createCommandBuffers();
     }
 
     fn build_swapchain(
@@ -810,7 +836,7 @@ impl RustTowerDefenseApplication {
         debug!("Monitor: {:#?}", monitor);
         let window_builder = WindowBuilder::new()
             .with_fullscreen(monitor)
-            .with_dimensions(dpi::LogicalSize::new(1024., 768.))
+            .with_dimensions(dpi::LogicalSize::new(2880., 1800.))
             .with_resizable(false)
             .with_title(WINDOW_NAME.to_string());
         let window = window_builder.build(&events_loop).unwrap();
@@ -1251,8 +1277,9 @@ impl RustTowerDefenseApplication {
                     local_state.update_from_input(inputs.unwrap());
                     let tid = thread::current().id();
                     debug!("thread ID (events_loop1) {:#?}", tid);
-                    drop(self.hal_state);
-                    self.hal_state = HalState::new(&self.window_state.window).unwrap();
+                    self.hal_state.should_recreate_swapchain = true;
+                    // drop(self.hal_state);
+                    // self.hal_state = HalState::new(&self.window_state.window).unwrap();
                 }
                 Some(r) => {
                     local_state.update_from_input(r);
@@ -1269,8 +1296,110 @@ impl RustTowerDefenseApplication {
                 // drop(hal_state);
                 let tid = thread::current().id();
                 debug!("thread ID (events_loop2, err) {:#?}", tid);
-                drop(self.hal_state);
-                self.hal_state = HalState::new(&self.window_state.window).unwrap();
+                self.hal_state.should_recreate_swapchain = true;
+                // drop(self.hal_state);
+                // self.hal_state = HalState::new(&self.window_state.window).unwrap();
+            }
+
+            if self.hal_state.should_recreate_swapchain {
+                error!("Have to recreate swapchain...");
+                self.hal_state.device.wait_idle().unwrap();
+
+                let (caps, formats, _present_modes, _) = self
+                    .hal_state
+                    .surface
+                    .compatibility(&mut self.hal_state.adapter.physical_device);
+                // Verify that previous format still exists so we may reuse it.
+                assert!(formats.iter().any(|fs| fs.contains(&self.hal_state.format)));
+
+                // XXX TODO change this hardcoded dimension so we can support resize, see
+                // https://github.com/gfx-rs/gfx/blob/afd03b752ca2a9d24b65de8ef293d58fd52ee4f2/examples/quad/main.rs
+                // let swapchain_config = SwapchainConfig {
+                //     present_mode,
+                //     composite_alpha,
+                //     format,
+                //     extent,
+                //     image_count,
+                //     image_layers,
+                //     image_usage,
+                // };
+                let extent = {
+                    Extent2D {
+                        width: 2880,
+                        height: 1800,
+                    }
+                };
+                let swap_config = SwapchainConfig::from_caps(&caps, self.hal_state.format, extent);
+                println!("{:?}", swap_config);
+                let extent = swap_config.extent.to_extent();
+
+                let (new_swap_chain, new_backbuffer) = unsafe {
+                    self.hal_state.device.create_swapchain(
+                        &mut self.hal_state.surface,
+                        swap_config,
+                        None,
+                        // XXX TODO not sure what this implies, auto-drop?
+                        //Some(self.hal_state.swapchain),
+                    )
+                }
+                .expect("Can't create swapchain");
+
+                unsafe {
+                    // Clean up the old framebuffers, images and swapchain
+                    &self.hal_state.cleanup_framebuffers();
+                }
+
+                // XXX TODO IDK??? do i need to drop this? it's manuallydrop
+                //drop(self.hal_state.swapchain);
+                self.hal_state.swapchain = ManuallyDrop::new(new_swap_chain);
+
+                let (new_frame_images, new_framebuffers) = match new_backbuffer {
+                    Backbuffer::Images(images) => {
+                        let imageviews = images
+                            .into_iter()
+                            .map(|image| unsafe {
+                                let rtv = self
+                                    .hal_state
+                                    .device
+                                    .create_image_view(
+                                        &image,
+                                        ViewKind::D2,
+                                        self.hal_state.format,
+                                        Swizzle::NO,
+                                        SubresourceRange {
+                                            aspects: Aspects::COLOR,
+                                            levels: 0..1,
+                                            layers: 0..1,
+                                        },
+                                    )
+                                    .unwrap();
+                                rtv
+                            })
+                            .collect::<Vec<_>>();
+                        let fbos = imageviews
+                            .iter()
+                            .map(|&ref rtv| unsafe {
+                                self.hal_state
+                                    .device
+                                    .create_framebuffer(
+                                        &self.hal_state.render_pass,
+                                        Some(rtv),
+                                        extent,
+                                    )
+                                    .unwrap()
+                            })
+                            .collect();
+                        (imageviews, fbos)
+                    }
+                    Backbuffer::Framebuffer(fbo) => (Vec::new(), vec![fbo]),
+                };
+
+                self.hal_state.framebuffers = new_framebuffers;
+                self.hal_state.image_views = new_frame_images;
+                // XXX TODO for resize vvv
+                // self.hal_state.viewport.rect.w = extent.width as _;
+                // self.hal_state.viewport.rect.h = extent.height as _;
+                self.hal_state.should_recreate_swapchain = false;
             }
         }
     }
