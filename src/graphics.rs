@@ -28,7 +28,7 @@ use std::cell::RefCell;
 use std::error::Error;
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::path::{Path};
+use std::path::Path;
 use std::thread;
 
 use arrayvec::ArrayVec;
@@ -41,17 +41,14 @@ use hal::{
     format::{Aspects, ChannelType, Format, Swizzle},
     image::{Extent, Layout, SubresourceRange, Usage, ViewKind},
     memory::{Properties, Requirements},
-    pass::{
-        Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp, Subpass,
-        SubpassDesc,
-    },
+    pass::{Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp, Subpass, SubpassDesc},
     pool::{CommandPool, CommandPoolCreateFlags},
     pso::{
-        AttributeDesc, BakedStates, BasePipeline, BlendDesc, BlendOp, BlendState,
-        ColorBlendDesc, ColorMask, DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding,
-        Element, EntryPoint, Face, Factor, FrontFace, GraphicsPipelineDesc, GraphicsShaderSet,
-        InputAssemblerDesc, LogicOp, PipelineCreationFlags, PipelineStage, PolygonMode, Rasterizer,
-        Rect, ShaderStageFlags, Specialization, StencilTest, VertexBufferDesc, Viewport,
+        AttributeDesc, BakedStates, BasePipeline, BlendDesc, BlendOp, BlendState, ColorBlendDesc,
+        ColorMask, DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding, Element, EntryPoint,
+        Face, Factor, FrontFace, GraphicsPipelineDesc, GraphicsShaderSet, InputAssemblerDesc,
+        LogicOp, PipelineCreationFlags, PipelineStage, PolygonMode, Rasterizer, Rect,
+        ShaderStageFlags, Specialization, StencilTest, VertexBufferDesc, Viewport,
     },
     queue::{self, family::QueueGroup, Submission},
     window::{Backbuffer, Extent2D, FrameSync, PresentMode, Swapchain, SwapchainConfig},
@@ -238,89 +235,8 @@ impl HalState {
         };
 
         // Create A Swapchain, this is extra long
-        let (swapchain, extent, backbuffer, format, frames_in_flight) = {
-            let (caps, preferred_formats, present_modes, composite_alphas) =
-                surface.compatibility(&adapter.physical_device);
-            info!("{:?}", caps);
-            info!("Preferred Formats: {:?}", preferred_formats);
-            info!("Present Modes: {:?}", present_modes);
-            info!("Composite Alphas: {:?}", composite_alphas);
-            //
-            let present_mode = {
-                use gfx_hal::window::PresentMode::*;
-                [Mailbox, Fifo, Relaxed, Immediate]
-                    .iter()
-                    .cloned()
-                    .find(|pm| present_modes.contains(pm))
-                    .ok_or("No PresentMode values specified!")?
-            };
-
-            let composite_alpha = {
-                use gfx_hal::window::CompositeAlpha::*;
-                [Opaque, Inherit, PreMultiplied, PostMultiplied]
-                    .iter()
-                    .cloned()
-                    .find(|ca| composite_alphas.contains(ca))
-                    .ok_or("No CompositeAlpha values specified!")?
-            };
-            let format = match preferred_formats {
-                None => Format::Rgba8Srgb,
-                Some(formats) => match formats
-                    .iter()
-                    .find(|format| format.base_format().1 == ChannelType::Srgb)
-                    .cloned()
-                {
-                    Some(srgb_format) => srgb_format,
-                    None => formats
-                        .get(0)
-                        .cloned()
-                        .ok_or("Preferred format list was empty!")?,
-                },
-            };
-            let extent = {
-                let window_client_area = window
-                    .get_inner_size()
-                    .ok_or("Window doesn't exist!")?
-                    .to_physical(window.get_hidpi_factor());
-                Extent2D {
-                    width: caps.extents.end.width.min(window_client_area.width as u32),
-                    height: caps
-                        .extents
-                        .end
-                        .height
-                        .min(window_client_area.height as u32),
-                }
-            };
-            let image_count = if present_mode == PresentMode::Mailbox {
-                (caps.image_count.end - 1).min(3)
-            } else {
-                (caps.image_count.end - 1).min(2)
-            };
-            let image_layers = 1;
-            let image_usage = if caps.usage.contains(Usage::COLOR_ATTACHMENT) {
-                Usage::COLOR_ATTACHMENT
-            } else {
-                Err("The Surface isn't capable of supporting color!")?
-            };
-            debug!("Present mode: {:#?}", present_mode);
-            let swapchain_config = SwapchainConfig {
-                present_mode,
-                composite_alpha,
-                format,
-                extent,
-                image_count,
-                image_layers,
-                image_usage,
-            };
-            info!("{:?}", swapchain_config);
-            //
-            let (swapchain, backbuffer) = unsafe {
-                device
-                    .create_swapchain(&mut surface, swapchain_config, None)
-                    .map_err(|_| "Failed to create the swapchain!")?
-            };
-            (swapchain, extent, backbuffer, format, image_count as usize)
-        };
+        let (swapchain, extent, backbuffer, format, frames_in_flight) =
+            HalState::build_swapchain(&mut surface, &adapter, &window, &device)?;
 
         // Create Our Sync Primitives
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) = {
@@ -488,6 +404,104 @@ impl HalState {
             pipeline_layout: ManuallyDrop::new(pipeline_layout),
             graphics_pipeline: ManuallyDrop::new(graphics_pipeline),
         })
+    }
+
+    fn build_swapchain(
+        mut surface: &mut back::Surface,
+        adapter: &Adapter<back::Backend>,
+        window: &Window,
+        device: &back::Device,
+    ) -> Result<
+        (
+            back::Swapchain,
+            Extent2D,
+            Backbuffer<back::Backend>,
+            Format,
+            usize,
+        ),
+        &'static str,
+    > {
+        let (caps, preferred_formats, present_modes, composite_alphas) =
+            surface.compatibility(&adapter.physical_device);
+        info!("{:?}", caps);
+        info!("Preferred Formats: {:?}", preferred_formats);
+        info!("Present Modes: {:?}", present_modes);
+        info!("Composite Alphas: {:?}", composite_alphas);
+        //
+        let present_mode = {
+            use gfx_hal::window::PresentMode::*;
+            [Mailbox, Fifo, Relaxed, Immediate]
+                .iter()
+                .cloned()
+                .find(|pm| present_modes.contains(pm))
+                .ok_or("No PresentMode values specified!")?
+        };
+
+        let composite_alpha = {
+            use gfx_hal::window::CompositeAlpha::*;
+            [Opaque, Inherit, PreMultiplied, PostMultiplied]
+                .iter()
+                .cloned()
+                .find(|ca| composite_alphas.contains(ca))
+                .ok_or("No CompositeAlpha values specified!")?
+        };
+        let format = match preferred_formats {
+            None => Format::Rgba8Srgb,
+            Some(formats) => match formats
+                .iter()
+                .find(|format| format.base_format().1 == ChannelType::Srgb)
+                .cloned()
+            {
+                Some(srgb_format) => srgb_format,
+                None => formats
+                    .get(0)
+                    .cloned()
+                    .ok_or("Preferred format list was empty!")?,
+            },
+        };
+        let extent = {
+            let window_client_area = window
+                .get_inner_size()
+                .ok_or("Window doesn't exist!")?
+                .to_physical(window.get_hidpi_factor());
+            Extent2D {
+                width: caps.extents.end.width.min(window_client_area.width as u32),
+                height: caps
+                    .extents
+                    .end
+                    .height
+                    .min(window_client_area.height as u32),
+            }
+        };
+        let image_count = if present_mode == PresentMode::Mailbox {
+            (caps.image_count.end - 1).min(3)
+        } else {
+            (caps.image_count.end - 1).min(2)
+        };
+        let image_layers = 1;
+        let image_usage = if caps.usage.contains(Usage::COLOR_ATTACHMENT) {
+            Usage::COLOR_ATTACHMENT
+        } else {
+            Err("The Surface isn't capable of supporting color!")?
+        };
+        debug!("Present mode: {:#?}", present_mode);
+        let swapchain_config = SwapchainConfig {
+            present_mode,
+            composite_alpha,
+            format,
+            extent,
+            image_count,
+            image_layers,
+            image_usage,
+        };
+        info!("{:?}", swapchain_config);
+        //
+        let (swapchain, backbuffer) = unsafe {
+            device
+                .create_swapchain(&mut surface, swapchain_config, None)
+                .map_err(|_| "Failed to create the swapchain!")?
+        };
+        Ok((swapchain, extent, backbuffer, format, image_count as usize))
     }
 
     pub fn draw_triangle_frame(&mut self, triangle: Triangle) -> Result<(), &'static str> {
