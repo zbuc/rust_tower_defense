@@ -658,7 +658,23 @@ impl UserInput {
             } => {
                 output = UserInput::NewMousePosition(Some((position.x, position.y)));
             }
-            Event::WindowEvent { event, .. } => (),
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::KeyboardInput {
+                    input:
+                        winit::KeyboardInput {
+                            virtual_keycode: Some(virtual_code),
+                            state,
+                            ..
+                        },
+                    ..
+                } => match (virtual_code, state) {
+                    (winit::VirtualKeyCode::Escape, _) => {
+                        output = UserInput::EndRequested;
+                    },
+                    _ => (),
+                },
+                _ => (),
+            },
             _ => (),
             // } => match event {
             //     WindowEvent::KeyboardInput {
