@@ -729,23 +729,10 @@ struct RustTowerDefenseApplication {
     window_state: WindowState,
 }
 
-type ShaderData = Vec<u8>;
-
-impl RustTowerDefenseApplication {
+trait GraphicalGame {
     /// Initialize a new instance of the application. Will initialize the
-    /// window and graphics state, and then return a new RustTowerDefenseApplication.
-    pub fn init() -> RustTowerDefenseApplication {
-        let window_state = RustTowerDefenseApplication::init_window();
-        let hal_state = match HalState::new(&window_state.window) {
-            Ok(state) => state,
-            Err(e) => panic!(e),
-        };
-
-        RustTowerDefenseApplication {
-            hal_state: hal_state,
-            window_state,
-        }
-    }
+    /// window and graphics state, and then return a new T: <GraphicalGame>.
+    fn init() -> Self;
 
     // https://github.com/tomaka/winit/blob/master/examples/fullscreen.rs
     fn get_monitor(events_loop: &winit::EventsLoop) -> Option<winit::MonitorId> {
@@ -845,7 +832,7 @@ impl RustTowerDefenseApplication {
     }
 
     /// Gets the compiled shader code from the SHADER_DIR
-    pub fn get_shader_code(shader_name: &str) -> Result<ShaderData, Box<dyn Error>> {
+    fn get_shader_code(shader_name: &str) -> Result<ShaderData, Box<dyn Error>> {
         // I will probably want to use some human-readable JSON config for top-level
         // map configurations.
         let shader_path = Path::new(SHADER_DIR).join(shader_name);
@@ -1039,13 +1026,29 @@ impl RustTowerDefenseApplication {
         Ok((descriptor_set_layouts, pipeline_layout, gfx_pipeline))
     }
 
-    fn do_the_render(&mut self, local_state: &LocalState) -> Result<(), &'static str> {
-        let x = ((local_state.mouse_x / local_state.frame_width) * 2.0) - 1.0;
-        let y = ((local_state.mouse_y / local_state.frame_height) * 2.0) - 1.0;
-        let triangle = Triangle {
-            points: [[-0.5, 0.5], [-0.5, -0.5], [x as f32, y as f32]],
+    fn do_the_render(&mut self, local_state: &LocalState) -> Result<(), &'static str>;
+
+    fn run(self);
+
+    fn main_loop(self);
+}
+
+type ShaderData = Vec<u8>;
+
+impl GraphicalGame for RustTowerDefenseApplication {
+    /// Initialize a new instance of the application. Will initialize the
+    /// window and graphics state, and then return a new RustTowerDefenseApplication.
+    fn init() -> RustTowerDefenseApplication {
+        let window_state = RustTowerDefenseApplication::init_window();
+        let hal_state = match HalState::new(&window_state.window) {
+            Ok(state) => state,
+            Err(e) => panic!(e),
         };
-        self.hal_state.borrow_mut().draw_triangle_frame(triangle)
+
+        RustTowerDefenseApplication {
+            hal_state: hal_state,
+            window_state,
+        }
     }
 
     /// Runs window state's event loop until a CloseRequested event is received
@@ -1212,6 +1215,15 @@ impl RustTowerDefenseApplication {
                 self.hal_state.should_recreate_swapchain = false;
             }
         }
+    }
+
+    fn do_the_render(&mut self, local_state: &LocalState) -> Result<(), &'static str> {
+        let x = ((local_state.mouse_x / local_state.frame_width) * 2.0) - 1.0;
+        let y = ((local_state.mouse_y / local_state.frame_height) * 2.0) - 1.0;
+        let triangle = Triangle {
+            points: [[-0.5, 0.5], [-0.5, -0.5], [x as f32, y as f32]],
+        };
+        self.hal_state.borrow_mut().draw_triangle_frame(triangle)
     }
 
     /// Runs the application's main loop function.
