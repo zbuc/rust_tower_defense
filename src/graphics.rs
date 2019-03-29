@@ -17,6 +17,7 @@ extern crate gfx_backend_gl as back;
 extern crate gfx_backend_metal as back;
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
+extern crate gfx_backend_vulkan as back;
 extern crate gfx_hal as hal;
 extern crate log;
 
@@ -51,7 +52,7 @@ use hal::{
         ShaderStageFlags, Specialization, StencilTest, VertexBufferDesc, VertexInputRate, Viewport,
     },
     queue::{self, family::QueueGroup, Submission},
-    window::{Backbuffer, Extent2D, FrameSync, PresentMode, Swapchain, SwapchainConfig},
+    window::{Backbuffer, Extent2D, PresentMode, Swapchain, SwapchainConfig},
     Backend, Gpu, Graphics, Instance, Primitive, QueueFamily, Surface,
 };
 use winit::{dpi, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
@@ -214,27 +215,12 @@ impl HalState {
 
         // Open A Device and take out a QueueGroup
         let (mut device, queue_group) = {
-            let queue_family = adapter
-                .queue_families
-                .iter()
-                .find(|qf| qf.supports_graphics() && surface.supports_queue_family(qf))
-                .ok_or("Couldn't find a QueueFamily with graphics!")?;
-
-            let (device, mut queue_group) = adapter
+            let (device, queue_group) = adapter
                 .open_with::<_, hal::Graphics>(1, |queue_family| {
                     surface.supports_queue_family(queue_family)
                 })
                 .unwrap();
 
-            // let Gpu { device, mut queues } = unsafe {
-            //     adapter
-            //         .physical_device
-            //         .open(&[(&queue_family, &[1.0; 1])])
-            //         .map_err(|_| "Couldn't open the PhysicalDevice!")?
-            // };
-            // let queue_group = queues
-            //     .take::<Graphics>(queue_family.id())
-            //     .ok_or("Couldn't take ownership of the QueueGroup!")?;
             if !queue_group.queues.is_empty() {
                 Ok(())
             } else {
@@ -440,13 +426,13 @@ impl HalState {
     }
 
     fn build_swapchain(
-        mut surface: &mut back::Surface,
+        mut surface: &mut <back::Backend as Backend>::Surface,
         adapter: &Adapter<back::Backend>,
         window: &Window,
         device: &back::Device,
     ) -> Result<
         (
-            back::Swapchain,
+            <back::Backend as Backend>::Swapchain,
             Extent2D,
             Backbuffer<back::Backend>,
             Format,
@@ -512,12 +498,6 @@ impl HalState {
         } else {
             (caps.image_count.end - 1).min(2)
         };
-        let image_layers = 1;
-        let image_usage = if caps.usage.contains(Usage::COLOR_ATTACHMENT) {
-            Usage::COLOR_ATTACHMENT
-        } else {
-            Err("The Surface isn't capable of supporting color!")?
-        };
         debug!("Present mode: {:#?}", present_mode);
         let swapchain_config = SwapchainConfig::from_caps(&caps, format, extent);
         // let swapchain_config = SwapchainConfig {
@@ -551,7 +531,8 @@ impl HalState {
         let (i_u32, i_usize) = unsafe {
             let image_index = self
                 .swapchain
-                .acquire_image(core::u64::MAX, FrameSync::Semaphore(image_available))
+                // .acquire_image(core::u64::MAX, FrameSync::Semaphore(image_available))
+                .acquire_image(!0, Some(image_available), None)
                 .map_err(|_| "Couldn't acquire an image from the swapchain!")?;
             (image_index, image_index as usize)
         };
@@ -755,7 +736,7 @@ impl RustTowerDefenseApplication {
     /// window and graphics state, and then return a new RustTowerDefenseApplication.
     pub fn init() -> RustTowerDefenseApplication {
         let window_state = RustTowerDefenseApplication::init_window();
-        let mut hal_state = match HalState::new(&window_state.window) {
+        let hal_state = match HalState::new(&window_state.window) {
             Ok(state) => state,
             Err(e) => panic!(e),
         };
@@ -1234,7 +1215,7 @@ impl RustTowerDefenseApplication {
     }
 
     /// Runs the application's main loop function.
-    fn run(mut self) {
+    fn run(self) {
         info!("Running application...");
         self.main_loop();
     }
