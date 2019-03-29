@@ -18,7 +18,6 @@ extern crate gfx_backend_metal as back;
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
 extern crate gfx_backend_vulkan as back;
-extern crate gfx_hal as hal;
 extern crate log;
 
 extern crate glsl_to_spirv;
@@ -32,9 +31,7 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::thread;
 
-use arrayvec::ArrayVec;
-use core::mem::{size_of, ManuallyDrop};
-use hal::{
+use crate::hal::{
     adapter::{Adapter, MemoryTypeId, PhysicalDevice},
     buffer::Usage as BufferUsage,
     command::{ClearColor, ClearValue, CommandBuffer, MultiShot, Primary},
@@ -55,6 +52,9 @@ use hal::{
     window::{Backbuffer, Extent2D, PresentMode, Swapchain, SwapchainConfig},
     Backend, Gpu, Graphics, Instance, Primitive, QueueFamily, Surface,
 };
+use arrayvec::ArrayVec;
+use core::mem::{size_of, ManuallyDrop};
+use winit::dpi::LogicalSize;
 use winit::{dpi, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 //use log::Level;
@@ -82,24 +82,6 @@ const MAX_FRAMES_IN_FLIGHT: usize = 2;
 static WINDOW_NAME: &str = "Rust Tower Defense 0.1.0";
 static SHADER_DIR: &str = "./assets/gen/shaders/";
 
-/// Runs the main graphics event loop.
-///
-/// Exits when the window is closed.
-/// Eventually we'll have a command system responsible
-/// for telling the window to close.
-pub fn run() {
-    // if building in debug mode, vulkan backend initializes standard validation layers
-    // all we need to do is enable logging
-    // run the program like so to print all logs of level 'warn' and above:
-    // bash: RUST_LOG=warn && cargo run --bin 02_validation_layers --features vulkan
-    // powershell: $env:RUST_LOG="warn"; cargo run --bin 02_validation_layers --features vulkan
-    // see: https://docs.rs/env_logger/0.5.13/env_logger/
-    env_logger::init();
-    info!("Starting the application!");
-    let application = RustTowerDefenseApplication::init();
-    application.run();
-}
-
 /// Holds configuration flags for the window.
 struct WindowConfig {
     is_maximized: bool,
@@ -110,14 +92,23 @@ struct WindowConfig {
 }
 
 /// The state object for the window.
-struct WindowState {
-    events_loop: Option<EventsLoop>,
+pub struct WindowState {
+    pub events_loop: Option<EventsLoop>,
     window: Window,
     window_config: RefCell<WindowConfig>,
 }
 
+impl WindowState {
+    pub fn get_frame_size(&self) -> (f64, f64) {
+        self.window
+            .get_inner_size()
+            .map(|logical| logical.into())
+            .unwrap_or((0.0, 0.0))
+    }
+}
+
 /// The state object for the graphics backend.
-struct HalState {
+pub struct HalState {
     buffer: ManuallyDrop<<back::Backend as Backend>::Buffer>,
     memory: ManuallyDrop<<back::Backend as Backend>::Memory>,
     descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout>,
@@ -192,6 +183,426 @@ impl core::ops::Drop for HalState {
             ManuallyDrop::drop(&mut self._instance);
         }
     }
+}
+
+pub struct GraphicsState {
+    pub hal_state: HalState,
+    pub window_state: WindowState,
+}
+
+impl GraphicsState {
+    pub fn init() -> Self {
+        let window_state = Self::init_window();
+        let hal_state = Self::init_hal_state(&window_state);
+
+        Self {
+            hal_state: hal_state,
+            window_state: window_state,
+        }
+    }
+
+    fn init_hal_state(window_state: &WindowState) -> HalState {
+        let hal_state = match HalState::new(&window_state.window) {
+            Ok(state) => state,
+            Err(e) => panic!(e),
+        };
+        hal_state
+    }
+
+    // https://github.com/tomaka/winit/blob/master/examples/fullscreen.rs
+    fn get_monitor(events_loop: &winit::EventsLoop) -> Option<winit::MonitorId> {
+        #[cfg(target_os = "macos")]
+        let mut macos_use_simple_fullscreen = false;
+
+        // On macOS there are two fullscreen modes "native" and "simple"
+        #[cfg(target_os = "macos")]
+        {
+            print!("Please choose the fullscreen mode: (1) native, (2) simple: ");
+            io::stdout().flush().unwrap();
+
+            let mut num = String::new();
+            io::stdin().read_line(&mut num).unwrap();
+            let num = num.trim().parse().ok().expect("Please enter a number");
+            match num {
+                2 => macos_use_simple_fullscreen = true,
+                _ => {}
+            }
+
+            // Prompt for monitor when using native fullscreen
+            if !macos_use_simple_fullscreen {
+                debug!("No simple fullscreen");
+                Some(RustTowerDefenseApplication::prompt_for_monitor(
+                    &events_loop,
+                ))
+            } else {
+                debug!("Yes simple fullscreen");
+                None
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Some(Self::prompt_for_monitor(&events_loop))
+    }
+
+    /// Enumerate monitors and prompt user to choose one
+    fn prompt_for_monitor(events_loop: &winit::EventsLoop) -> winit::MonitorId {
+        for (num, monitor) in events_loop.get_available_monitors().enumerate() {
+            println!("Monitor #{}: {:?}", num, monitor.get_name());
+        }
+
+        print!("Please write the number of the monitor to use: ");
+        io::stdout().flush().unwrap();
+
+        let mut num = String::new();
+        io::stdin().read_line(&mut num).unwrap();
+        let num = num.trim().parse().ok().expect("Please enter a number");
+        let monitor = events_loop
+            .get_available_monitors()
+            .nth(num)
+            .expect("Please enter a valid ID");
+
+        println!("Using {:?}", monitor.get_name());
+
+        monitor
+    }
+    /// Initializes the window state. Creates a new event loop, builds the window
+    /// at the desired resolution, sets the title, and returns the newly created window
+    /// with those parameters.
+    ///
+    /// ## Failure
+    /// It's possible for the window creation to fail.
+    fn init_window() -> WindowState {
+        let tid = thread::current().id();
+        debug!("thread ID (init_window) {:#?}", tid);
+        let events_loop = EventsLoop::new();
+
+        let monitor = Self::get_monitor(&events_loop);
+
+        debug!("Monitor: {:#?}", monitor);
+        let window_builder = WindowBuilder::new()
+            .with_fullscreen(monitor)
+            .with_dimensions(dpi::LogicalSize::new(2880., 1800.))
+            .with_resizable(false)
+            .with_title(WINDOW_NAME.to_string());
+        let window = window_builder.build(&events_loop).unwrap();
+        window.set_maximized(true);
+        window.set_fullscreen(Some(window.get_current_monitor()));
+
+        let window_config = RefCell::new(WindowConfig {
+            is_fullscreen: false,
+            is_maximized: true,
+            decorations: true,
+            #[cfg(target_os = "macos")]
+            macos_use_simple_fullscreen: false,
+        });
+
+        WindowState {
+            events_loop: Some(events_loop),
+            window: window,
+            window_config,
+        }
+    }
+
+    pub fn restart_halstate(&mut self, local_state: LocalState) {
+        // XXX This actually isn't a great implementation, we want to keep
+        // what state we can, but this is easier to implement.
+        //let hal_state = HalState::new(&self.window_state.window).unwrap();
+        //drop(self.hal_state);
+        //mem::replace(&mut self.hal_state, hal_state);
+        let tid = thread::current().id();
+        debug!("thread ID (events_loop1) {:#?}", tid);
+        self.hal_state.should_recreate_swapchain = true;
+        // drop(self.hal_state);
+        // self.hal_state = HalState::new(&self.window_state.window).unwrap();
+    }
+
+    pub fn draw_triangle(&mut self, triangle: Triangle) -> Result<(), &'static str> {
+        self.hal_state.borrow_mut().draw_triangle_frame(triangle)
+    }
+
+    pub fn recreate_swapchain_if_necessary(&mut self) {
+        if !self.hal_state.should_recreate_swapchain {
+            return;
+        }
+
+        debug!("Have to recreate swapchain...");
+        self.hal_state.device.wait_idle().unwrap();
+
+        let (caps, formats, _present_modes) = self
+            .hal_state
+            .surface
+            .compatibility(&mut self.hal_state.adapter.physical_device);
+        // Verify that previous format still exists so we may reuse it.
+        assert!(formats.iter().any(|fs| fs.contains(&self.hal_state.format)));
+
+        // XXX TODO change this hardcoded dimension so we can support resize, see
+        // https://github.com/gfx-rs/gfx/blob/afd03b752ca2a9d24b65de8ef293d58fd52ee4f2/examples/quad/main.rs
+        // let swapchain_config = SwapchainConfig {
+        //     present_mode,
+        //     composite_alpha,
+        //     format,
+        //     extent,
+        //     image_count,
+        //     image_layers,
+        //     image_usage,
+        // };
+        let extent = {
+            Extent2D {
+                width: 2880,
+                height: 1800,
+            }
+        };
+        let swap_config = SwapchainConfig::from_caps(&caps, self.hal_state.format, extent);
+        println!("{:?}", swap_config);
+        let extent = swap_config.extent.to_extent();
+
+        let (new_swap_chain, new_backbuffer) = unsafe {
+            self.hal_state.device.create_swapchain(
+                &mut self.hal_state.surface,
+                swap_config,
+                None,
+                // XXX TODO not sure what this implies, auto-drop?
+                //Some(self.hal_state.swapchain),
+            )
+        }
+        .expect("Can't create swapchain");
+
+        unsafe {
+            // Clean up the old framebuffers, images and swapchain
+            &self.hal_state.cleanup_framebuffers();
+        }
+
+        // XXX TODO IDK??? do i need to drop this? it's manuallydrop
+        //drop(self.hal_state.swapchain);
+        self.hal_state.swapchain = ManuallyDrop::new(new_swap_chain);
+
+        let (new_frame_images, new_framebuffers) = match new_backbuffer {
+            Backbuffer::Images(images) => {
+                let imageviews = images
+                    .into_iter()
+                    .map(|image| unsafe {
+                        let rtv = self
+                            .hal_state
+                            .device
+                            .create_image_view(
+                                &image,
+                                ViewKind::D2,
+                                self.hal_state.format,
+                                Swizzle::NO,
+                                SubresourceRange {
+                                    aspects: Aspects::COLOR,
+                                    levels: 0..1,
+                                    layers: 0..1,
+                                },
+                            )
+                            .unwrap();
+                        rtv
+                    })
+                    .collect::<Vec<_>>();
+                let fbos = imageviews
+                    .iter()
+                    .map(|&ref rtv| unsafe {
+                        self.hal_state
+                            .device
+                            .create_framebuffer(&self.hal_state.render_pass, Some(rtv), extent)
+                            .unwrap()
+                    })
+                    .collect();
+                (imageviews, fbos)
+            }
+            Backbuffer::Framebuffer(fbo) => (Vec::new(), vec![fbo]),
+        };
+
+        self.hal_state.framebuffers = new_framebuffers;
+        self.hal_state.image_views = new_frame_images;
+        // XXX TODO for resize vvv
+        // self.hal_state.viewport.rect.w = extent.width as _;
+        // self.hal_state.viewport.rect.h = extent.height as _;
+        self.hal_state.should_recreate_swapchain = false;
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn create_pipeline(
+    device: &mut back::Device,
+    extent: Extent2D,
+    render_pass: &<back::Backend as Backend>::RenderPass,
+) -> Result<
+    (
+        Vec<<back::Backend as Backend>::DescriptorSetLayout>,
+        <back::Backend as Backend>::PipelineLayout,
+        <back::Backend as Backend>::GraphicsPipeline,
+    ),
+    &'static str,
+> {
+    let mut compiler = shaderc::Compiler::new().ok_or("shaderc not found!")?;
+    let vertex_compile_artifact = compiler
+        .compile_into_spirv(
+            VERTEX_SOURCE,
+            shaderc::ShaderKind::Vertex,
+            "vertex.vert",
+            "main",
+            None,
+        )
+        .map_err(|_| "Couldn't compile vertex shader!")?;
+    let fragment_compile_artifact = compiler
+        .compile_into_spirv(
+            FRAGMENT_SOURCE,
+            shaderc::ShaderKind::Fragment,
+            "fragment.frag",
+            "main",
+            None,
+        )
+        .map_err(|e| {
+            error!("{}", e);
+            "Couldn't compile fragment shader!"
+        })?;
+    let vertex_shader_module = unsafe {
+        device
+            .create_shader_module(vertex_compile_artifact.as_binary_u8())
+            .map_err(|_| "Couldn't make the vertex module")?
+    };
+    let fragment_shader_module = unsafe {
+        device
+            .create_shader_module(fragment_compile_artifact.as_binary_u8())
+            .map_err(|_| "Couldn't make the fragment module")?
+    };
+    let (descriptor_set_layouts, pipeline_layout, gfx_pipeline) = {
+        let (vs_entry, fs_entry) = (
+            EntryPoint {
+                entry: "main",
+                module: &vertex_shader_module,
+                specialization: Specialization {
+                    constants: &[],
+                    data: &[],
+                },
+            },
+            EntryPoint {
+                entry: "main",
+                module: &fragment_shader_module,
+                specialization: Specialization {
+                    constants: &[],
+                    data: &[],
+                },
+            },
+        );
+        let shaders = GraphicsShaderSet {
+            vertex: vs_entry,
+            hull: None,
+            domain: None,
+            geometry: None,
+            fragment: Some(fs_entry),
+        };
+
+        let input_assembler = InputAssemblerDesc::new(Primitive::TriangleList);
+
+        let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
+            binding: 0,
+            stride: (size_of::<f32>() * 2) as u32,
+            rate: VertexInputRate::Vertex,
+        }];
+        let attributes: Vec<AttributeDesc> = vec![AttributeDesc {
+            location: 0,
+            binding: 0,
+            element: Element {
+                format: Format::Rg32Sfloat,
+                offset: 0,
+            },
+        }];
+
+        let rasterizer = Rasterizer {
+            depth_clamping: false,
+            polygon_mode: PolygonMode::Fill,
+            cull_face: Face::NONE,
+            front_face: FrontFace::Clockwise,
+            depth_bias: None,
+            conservative: false,
+        };
+
+        let depth_stencil = DepthStencilDesc {
+            depth: DepthTest::Off,
+            depth_bounds: false,
+            stencil: StencilTest::Off,
+        };
+
+        let blender = {
+            let blend_state = BlendState::On {
+                color: BlendOp::Add {
+                    src: Factor::One,
+                    dst: Factor::Zero,
+                },
+                alpha: BlendOp::Add {
+                    src: Factor::One,
+                    dst: Factor::Zero,
+                },
+            };
+            BlendDesc {
+                logic_op: Some(LogicOp::Copy),
+                targets: vec![ColorBlendDesc(ColorMask::ALL, blend_state)],
+            }
+        };
+
+        let baked_states = BakedStates {
+            viewport: Some(Viewport {
+                rect: extent.to_extent().rect(),
+                depth: (0.0..1.0),
+            }),
+            scissor: Some(extent.to_extent().rect()),
+            blend_color: None,
+            depth_bounds: None,
+        };
+
+        let bindings = Vec::<DescriptorSetLayoutBinding>::new();
+        let immutable_samplers = Vec::<<back::Backend as Backend>::Sampler>::new();
+        let descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout> =
+            vec![unsafe {
+                device
+                    .create_descriptor_set_layout(bindings, immutable_samplers)
+                    .map_err(|_| "Couldn't make a DescriptorSetLayout")?
+            }];
+        let push_constants = Vec::<(ShaderStageFlags, core::ops::Range<u32>)>::new();
+        let layout = unsafe {
+            device
+                .create_pipeline_layout(&descriptor_set_layouts, push_constants)
+                .map_err(|_| "Couldn't create a pipeline layout")?
+        };
+
+        let gfx_pipeline = {
+            let desc = GraphicsPipelineDesc {
+                shaders,
+                rasterizer,
+                vertex_buffers,
+                attributes,
+                input_assembler,
+                blender,
+                depth_stencil,
+                multisampling: None,
+                baked_states,
+                layout: &layout,
+                subpass: Subpass {
+                    index: 0,
+                    main_pass: render_pass,
+                },
+                flags: PipelineCreationFlags::empty(),
+                parent: BasePipeline::None,
+            };
+
+            unsafe {
+                device
+                    .create_graphics_pipeline(&desc, None)
+                    .map_err(|_| "Couldn't create a graphics pipeline!")?
+            }
+        };
+
+        (descriptor_set_layouts, layout, gfx_pipeline)
+    };
+
+    unsafe {
+        device.destroy_shader_module(vertex_shader_module);
+        device.destroy_shader_module(fragment_shader_module);
+    }
+
+    Ok((descriptor_set_layouts, pipeline_layout, gfx_pipeline))
 }
 
 impl HalState {
@@ -346,7 +757,7 @@ impl HalState {
 
         // Build our pipeline and vertex buffer
         let (descriptor_set_layouts, pipeline_layout, graphics_pipeline) =
-            RustTowerDefenseApplication::create_pipeline(&mut device, extent, &render_pass)?;
+            create_pipeline(&mut device, extent, &render_pass)?;
         let (buffer, memory, requirements) = unsafe {
             const F32_XY_TRIANGLE: u64 = (size_of::<f32>() * 2 * 3) as u64;
             let mut buffer = device
@@ -719,117 +1130,10 @@ impl QueueFamilyIds {
     }
 }
 
-/// The application contains the window and graphics
-/// drivers' states. This is the main interface to interact
-/// with the application. We would probably expand this to be
-/// the systems' manager at some point, or reference it from
-/// the systems' manager.
-struct RustTowerDefenseApplication {
-    hal_state: HalState,
-    window_state: WindowState,
-}
-
-trait GraphicalGame {
+pub trait GraphicalGame {
     /// Initialize a new instance of the application. Will initialize the
     /// window and graphics state, and then return a new T: <GraphicalGame>.
     fn init() -> Self;
-
-    // https://github.com/tomaka/winit/blob/master/examples/fullscreen.rs
-    fn get_monitor(events_loop: &winit::EventsLoop) -> Option<winit::MonitorId> {
-        #[cfg(target_os = "macos")]
-        let mut macos_use_simple_fullscreen = false;
-
-        // On macOS there are two fullscreen modes "native" and "simple"
-        #[cfg(target_os = "macos")]
-        {
-            print!("Please choose the fullscreen mode: (1) native, (2) simple: ");
-            io::stdout().flush().unwrap();
-
-            let mut num = String::new();
-            io::stdin().read_line(&mut num).unwrap();
-            let num = num.trim().parse().ok().expect("Please enter a number");
-            match num {
-                2 => macos_use_simple_fullscreen = true,
-                _ => {}
-            }
-
-            // Prompt for monitor when using native fullscreen
-            if !macos_use_simple_fullscreen {
-                debug!("No simple fullscreen");
-                Some(RustTowerDefenseApplication::prompt_for_monitor(
-                    &events_loop,
-                ))
-            } else {
-                debug!("Yes simple fullscreen");
-                None
-            }
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        Some(RustTowerDefenseApplication::prompt_for_monitor(
-            &events_loop,
-        ))
-    }
-
-    /// Enumerate monitors and prompt user to choose one
-    fn prompt_for_monitor(events_loop: &winit::EventsLoop) -> winit::MonitorId {
-        for (num, monitor) in events_loop.get_available_monitors().enumerate() {
-            println!("Monitor #{}: {:?}", num, monitor.get_name());
-        }
-
-        print!("Please write the number of the monitor to use: ");
-        io::stdout().flush().unwrap();
-
-        let mut num = String::new();
-        io::stdin().read_line(&mut num).unwrap();
-        let num = num.trim().parse().ok().expect("Please enter a number");
-        let monitor = events_loop
-            .get_available_monitors()
-            .nth(num)
-            .expect("Please enter a valid ID");
-
-        println!("Using {:?}", monitor.get_name());
-
-        monitor
-    }
-
-    /// Initializes the window state. Creates a new event loop, builds the window
-    /// at the desired resolution, sets the title, and returns the newly created window
-    /// with those parameters.
-    ///
-    /// ## Failure
-    /// It's possible for the window creation to fail.
-    fn init_window() -> WindowState {
-        let tid = thread::current().id();
-        debug!("thread ID (init_window) {:#?}", tid);
-        let events_loop = EventsLoop::new();
-
-        let monitor = RustTowerDefenseApplication::get_monitor(&events_loop);
-
-        debug!("Monitor: {:#?}", monitor);
-        let window_builder = WindowBuilder::new()
-            .with_fullscreen(monitor)
-            .with_dimensions(dpi::LogicalSize::new(2880., 1800.))
-            .with_resizable(false)
-            .with_title(WINDOW_NAME.to_string());
-        let window = window_builder.build(&events_loop).unwrap();
-        window.set_maximized(true);
-        window.set_fullscreen(Some(window.get_current_monitor()));
-
-        let window_config = RefCell::new(WindowConfig {
-            is_fullscreen: false,
-            is_maximized: true,
-            decorations: true,
-            #[cfg(target_os = "macos")]
-            macos_use_simple_fullscreen: false,
-        });
-
-        WindowState {
-            events_loop: Some(events_loop),
-            window: window,
-            window_config,
-        }
-    }
 
     /// Gets the compiled shader code from the SHADER_DIR
     fn get_shader_code(shader_name: &str) -> Result<ShaderData, Box<dyn Error>> {
@@ -843,392 +1147,11 @@ trait GraphicalGame {
         Ok(shader_data)
     }
 
-    #[allow(clippy::type_complexity)]
-    fn create_pipeline(
-        device: &mut back::Device,
-        extent: Extent2D,
-        render_pass: &<back::Backend as Backend>::RenderPass,
-    ) -> Result<
-        (
-            Vec<<back::Backend as Backend>::DescriptorSetLayout>,
-            <back::Backend as Backend>::PipelineLayout,
-            <back::Backend as Backend>::GraphicsPipeline,
-        ),
-        &'static str,
-    > {
-        let mut compiler = shaderc::Compiler::new().ok_or("shaderc not found!")?;
-        let vertex_compile_artifact = compiler
-            .compile_into_spirv(
-                VERTEX_SOURCE,
-                shaderc::ShaderKind::Vertex,
-                "vertex.vert",
-                "main",
-                None,
-            )
-            .map_err(|_| "Couldn't compile vertex shader!")?;
-        let fragment_compile_artifact = compiler
-            .compile_into_spirv(
-                FRAGMENT_SOURCE,
-                shaderc::ShaderKind::Fragment,
-                "fragment.frag",
-                "main",
-                None,
-            )
-            .map_err(|e| {
-                error!("{}", e);
-                "Couldn't compile fragment shader!"
-            })?;
-        let vertex_shader_module = unsafe {
-            device
-                .create_shader_module(vertex_compile_artifact.as_binary_u8())
-                .map_err(|_| "Couldn't make the vertex module")?
-        };
-        let fragment_shader_module = unsafe {
-            device
-                .create_shader_module(fragment_compile_artifact.as_binary_u8())
-                .map_err(|_| "Couldn't make the fragment module")?
-        };
-        let (descriptor_set_layouts, pipeline_layout, gfx_pipeline) = {
-            let (vs_entry, fs_entry) = (
-                EntryPoint {
-                    entry: "main",
-                    module: &vertex_shader_module,
-                    specialization: Specialization {
-                        constants: &[],
-                        data: &[],
-                    },
-                },
-                EntryPoint {
-                    entry: "main",
-                    module: &fragment_shader_module,
-                    specialization: Specialization {
-                        constants: &[],
-                        data: &[],
-                    },
-                },
-            );
-            let shaders = GraphicsShaderSet {
-                vertex: vs_entry,
-                hull: None,
-                domain: None,
-                geometry: None,
-                fragment: Some(fs_entry),
-            };
-
-            let input_assembler = InputAssemblerDesc::new(Primitive::TriangleList);
-
-            let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
-                binding: 0,
-                stride: (size_of::<f32>() * 2) as u32,
-                rate: VertexInputRate::Vertex,
-            }];
-            let attributes: Vec<AttributeDesc> = vec![AttributeDesc {
-                location: 0,
-                binding: 0,
-                element: Element {
-                    format: Format::Rg32Sfloat,
-                    offset: 0,
-                },
-            }];
-
-            let rasterizer = Rasterizer {
-                depth_clamping: false,
-                polygon_mode: PolygonMode::Fill,
-                cull_face: Face::NONE,
-                front_face: FrontFace::Clockwise,
-                depth_bias: None,
-                conservative: false,
-            };
-
-            let depth_stencil = DepthStencilDesc {
-                depth: DepthTest::Off,
-                depth_bounds: false,
-                stencil: StencilTest::Off,
-            };
-
-            let blender = {
-                let blend_state = BlendState::On {
-                    color: BlendOp::Add {
-                        src: Factor::One,
-                        dst: Factor::Zero,
-                    },
-                    alpha: BlendOp::Add {
-                        src: Factor::One,
-                        dst: Factor::Zero,
-                    },
-                };
-                BlendDesc {
-                    logic_op: Some(LogicOp::Copy),
-                    targets: vec![ColorBlendDesc(ColorMask::ALL, blend_state)],
-                }
-            };
-
-            let baked_states = BakedStates {
-                viewport: Some(Viewport {
-                    rect: extent.to_extent().rect(),
-                    depth: (0.0..1.0),
-                }),
-                scissor: Some(extent.to_extent().rect()),
-                blend_color: None,
-                depth_bounds: None,
-            };
-
-            let bindings = Vec::<DescriptorSetLayoutBinding>::new();
-            let immutable_samplers = Vec::<<back::Backend as Backend>::Sampler>::new();
-            let descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout> =
-                vec![unsafe {
-                    device
-                        .create_descriptor_set_layout(bindings, immutable_samplers)
-                        .map_err(|_| "Couldn't make a DescriptorSetLayout")?
-                }];
-            let push_constants = Vec::<(ShaderStageFlags, core::ops::Range<u32>)>::new();
-            let layout = unsafe {
-                device
-                    .create_pipeline_layout(&descriptor_set_layouts, push_constants)
-                    .map_err(|_| "Couldn't create a pipeline layout")?
-            };
-
-            let gfx_pipeline = {
-                let desc = GraphicsPipelineDesc {
-                    shaders,
-                    rasterizer,
-                    vertex_buffers,
-                    attributes,
-                    input_assembler,
-                    blender,
-                    depth_stencil,
-                    multisampling: None,
-                    baked_states,
-                    layout: &layout,
-                    subpass: Subpass {
-                        index: 0,
-                        main_pass: render_pass,
-                    },
-                    flags: PipelineCreationFlags::empty(),
-                    parent: BasePipeline::None,
-                };
-
-                unsafe {
-                    device
-                        .create_graphics_pipeline(&desc, None)
-                        .map_err(|_| "Couldn't create a graphics pipeline!")?
-                }
-            };
-
-            (descriptor_set_layouts, layout, gfx_pipeline)
-        };
-
-        unsafe {
-            device.destroy_shader_module(vertex_shader_module);
-            device.destroy_shader_module(fragment_shader_module);
-        }
-
-        Ok((descriptor_set_layouts, pipeline_layout, gfx_pipeline))
-    }
-
     fn do_the_render(&mut self, local_state: &LocalState) -> Result<(), &'static str>;
 
     fn run(self);
 
-    fn main_loop(self);
+    fn main_loop(mut self);
 }
 
 type ShaderData = Vec<u8>;
-
-impl GraphicalGame for RustTowerDefenseApplication {
-    /// Initialize a new instance of the application. Will initialize the
-    /// window and graphics state, and then return a new RustTowerDefenseApplication.
-    fn init() -> RustTowerDefenseApplication {
-        let window_state = RustTowerDefenseApplication::init_window();
-        let hal_state = match HalState::new(&window_state.window) {
-            Ok(state) => state,
-            Err(e) => panic!(e),
-        };
-
-        RustTowerDefenseApplication {
-            hal_state: hal_state,
-            window_state,
-        }
-    }
-
-    /// Runs window state's event loop until a CloseRequested event is received
-    /// This should take a event pipe to write keyboard events to that can
-    /// be processed by other systems.
-    fn main_loop(mut self) {
-        let (frame_width, frame_height) = self
-            .window_state
-            .window
-            .get_inner_size()
-            .map(|logical| logical.into())
-            .unwrap_or((0.0, 0.0));
-        let mut local_state = LocalState {
-            frame_width,
-            frame_height,
-            mouse_x: 0.0,
-            mouse_y: 0.0,
-        };
-
-        let mut events_loop = self
-            .window_state
-            .events_loop
-            .take()
-            .expect("events_loop does not exist!");
-
-        loop {
-            let inputs = UserInput::poll_events_loop(&mut events_loop);
-            match inputs {
-                Some(UserInput::EndRequested) => {
-                    break;
-                }
-                Some(UserInput::NewFrameSize(_)) => {
-                    debug!("Window changed size, restarting HalState...");
-                    // XXX This actually isn't a great implementation, we want to keep
-                    // what state we can, but this is easier to implement.
-                    //let hal_state = HalState::new(&self.window_state.window).unwrap();
-                    //drop(self.hal_state);
-                    //mem::replace(&mut self.hal_state, hal_state);
-                    local_state.update_from_input(inputs.unwrap());
-                    let tid = thread::current().id();
-                    debug!("thread ID (events_loop1) {:#?}", tid);
-                    self.hal_state.should_recreate_swapchain = true;
-                    // drop(self.hal_state);
-                    // self.hal_state = HalState::new(&self.window_state.window).unwrap();
-                }
-                Some(r) => {
-                    local_state.update_from_input(r);
-                }
-                None => (),
-            };
-            if let Err(e) = self.do_the_render(&local_state) {
-                debug!("Rendering Error: {:?}", e);
-                debug!("Auto-restarting HalState...");
-                // XXX This actually isn't a great implementation, we want to keep
-                // what state we can, but this is easier to implement.
-                // let hal_state = HalState::new(&self.window_state.window).unwrap();
-                // let hal_state = mem::replace(&mut self.hal_state, hal_state);
-                // drop(hal_state);
-                let tid = thread::current().id();
-                debug!("thread ID (events_loop2, err) {:#?}", tid);
-                self.hal_state.should_recreate_swapchain = true;
-                // drop(self.hal_state);
-                // self.hal_state = HalState::new(&self.window_state.window).unwrap();
-            }
-
-            if self.hal_state.should_recreate_swapchain {
-                debug!("Have to recreate swapchain...");
-                self.hal_state.device.wait_idle().unwrap();
-
-                let (caps, formats, _present_modes) = self
-                    .hal_state
-                    .surface
-                    .compatibility(&mut self.hal_state.adapter.physical_device);
-                // Verify that previous format still exists so we may reuse it.
-                assert!(formats.iter().any(|fs| fs.contains(&self.hal_state.format)));
-
-                // XXX TODO change this hardcoded dimension so we can support resize, see
-                // https://github.com/gfx-rs/gfx/blob/afd03b752ca2a9d24b65de8ef293d58fd52ee4f2/examples/quad/main.rs
-                // let swapchain_config = SwapchainConfig {
-                //     present_mode,
-                //     composite_alpha,
-                //     format,
-                //     extent,
-                //     image_count,
-                //     image_layers,
-                //     image_usage,
-                // };
-                let extent = {
-                    Extent2D {
-                        width: 2880,
-                        height: 1800,
-                    }
-                };
-                let swap_config = SwapchainConfig::from_caps(&caps, self.hal_state.format, extent);
-                println!("{:?}", swap_config);
-                let extent = swap_config.extent.to_extent();
-
-                let (new_swap_chain, new_backbuffer) = unsafe {
-                    self.hal_state.device.create_swapchain(
-                        &mut self.hal_state.surface,
-                        swap_config,
-                        None,
-                        // XXX TODO not sure what this implies, auto-drop?
-                        //Some(self.hal_state.swapchain),
-                    )
-                }
-                .expect("Can't create swapchain");
-
-                unsafe {
-                    // Clean up the old framebuffers, images and swapchain
-                    &self.hal_state.cleanup_framebuffers();
-                }
-
-                // XXX TODO IDK??? do i need to drop this? it's manuallydrop
-                //drop(self.hal_state.swapchain);
-                self.hal_state.swapchain = ManuallyDrop::new(new_swap_chain);
-
-                let (new_frame_images, new_framebuffers) = match new_backbuffer {
-                    Backbuffer::Images(images) => {
-                        let imageviews = images
-                            .into_iter()
-                            .map(|image| unsafe {
-                                let rtv = self
-                                    .hal_state
-                                    .device
-                                    .create_image_view(
-                                        &image,
-                                        ViewKind::D2,
-                                        self.hal_state.format,
-                                        Swizzle::NO,
-                                        SubresourceRange {
-                                            aspects: Aspects::COLOR,
-                                            levels: 0..1,
-                                            layers: 0..1,
-                                        },
-                                    )
-                                    .unwrap();
-                                rtv
-                            })
-                            .collect::<Vec<_>>();
-                        let fbos = imageviews
-                            .iter()
-                            .map(|&ref rtv| unsafe {
-                                self.hal_state
-                                    .device
-                                    .create_framebuffer(
-                                        &self.hal_state.render_pass,
-                                        Some(rtv),
-                                        extent,
-                                    )
-                                    .unwrap()
-                            })
-                            .collect();
-                        (imageviews, fbos)
-                    }
-                    Backbuffer::Framebuffer(fbo) => (Vec::new(), vec![fbo]),
-                };
-
-                self.hal_state.framebuffers = new_framebuffers;
-                self.hal_state.image_views = new_frame_images;
-                // XXX TODO for resize vvv
-                // self.hal_state.viewport.rect.w = extent.width as _;
-                // self.hal_state.viewport.rect.h = extent.height as _;
-                self.hal_state.should_recreate_swapchain = false;
-            }
-        }
-    }
-
-    fn do_the_render(&mut self, local_state: &LocalState) -> Result<(), &'static str> {
-        let x = ((local_state.mouse_x / local_state.frame_width) * 2.0) - 1.0;
-        let y = ((local_state.mouse_y / local_state.frame_height) * 2.0) - 1.0;
-        let triangle = Triangle {
-            points: [[-0.5, 0.5], [-0.5, -0.5], [x as f32, y as f32]],
-        };
-        self.hal_state.borrow_mut().draw_triangle_frame(triangle)
-    }
-
-    /// Runs the application's main loop function.
-    fn run(self) {
-        info!("Running application...");
-        self.main_loop();
-    }
-}

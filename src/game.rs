@@ -7,9 +7,16 @@ use std::fs::File;
 use std::io::Read;
 use std::io::Write;
 use std::rc::Rc;
+use std::thread;
 
 use super::geometry::Point;
+use super::graphics::{
+    GraphicalGame, GraphicsState, HalState, LocalState, Triangle, UserInput, WindowState,
+};
 use crate::bincode::{deserialize, serialize};
+use crate::hal::format::{Aspects, Swizzle};
+use crate::hal::window::{Backbuffer, Extent2D};
+use core::mem::ManuallyDrop;
 use entities::GameEntity;
 use map::{GameMap, DEFAULT_MAP, DEFAULT_MAP_DIMENSIONS, DEFAULT_MAP_NAME};
 
@@ -153,5 +160,110 @@ pub fn start_game(map: GameMap) -> ActiveGame {
             entities: Vec::new(),
         },
         started_time: 0,
+    }
+}
+
+/// Runs the main graphics event loop.
+///
+/// Exits when the window is closed.
+/// Eventually we'll have a command system responsible
+/// for telling the window to close.
+pub fn run() {
+    // if building in debug mode, vulkan backend initializes standard validation layers
+    // all we need to do is enable logging
+    // run the program like so to print all logs of level 'warn' and above:
+    // bash: RUST_LOG=warn && cargo run --bin 02_validation_layers --features vulkan
+    // powershell: $env:RUST_LOG="warn"; cargo run --bin 02_validation_layers --features vulkan
+    // see: https://docs.rs/env_logger/0.5.13/env_logger/
+    env_logger::init();
+    info!("Starting the application!");
+    let map = match get_default_map() {
+        Ok(map) => map,
+        Err(e) => panic!("Can't open default map: {}", e),
+    };
+
+    let game = start_game(map);
+    let application = RustTowerDefenseApplication::init();
+    application.run();
+}
+
+/// The application contains the window and graphics
+/// drivers' states. This is the main interface to interact
+/// with the application. We would probably expand this to be
+/// the systems' manager at some point, or reference it from
+/// the systems' manager.
+pub struct RustTowerDefenseApplication {
+    graphics_state: GraphicsState,
+}
+
+impl RustTowerDefenseApplication {}
+
+impl GraphicalGame for RustTowerDefenseApplication {
+    /// Initialize a new instance of the application. Will initialize the
+    /// window and graphics state, and then return a new RustTowerDefenseApplication.
+    fn init() -> RustTowerDefenseApplication {
+        RustTowerDefenseApplication {
+            graphics_state: GraphicsState::init(),
+        }
+    }
+
+    /// Runs window state's event loop until a CloseRequested event is received
+    /// This should take a event pipe to write keyboard events to that can
+    /// be processed by other systems.
+    fn main_loop(mut self) {
+        let (frame_width, frame_height) = self.graphics_state.window_state.get_frame_size();
+        let mut local_state = LocalState {
+            frame_width,
+            frame_height,
+            mouse_x: 0.0,
+            mouse_y: 0.0,
+        };
+
+        let mut events_loop = self
+            .graphics_state
+            .window_state
+            .events_loop
+            .take()
+            .expect("events_loop does not exist!");
+
+        loop {
+            let inputs = UserInput::poll_events_loop(&mut events_loop);
+            match inputs {
+                Some(UserInput::EndRequested) => {
+                    break;
+                }
+                Some(UserInput::NewFrameSize(_)) => {
+                    debug!("Window changed size, restarting HalState...");
+                    self.graphics_state.restart_halstate(local_state);
+                }
+                Some(r) => {
+                    local_state.update_from_input(r);
+                }
+                None => (),
+            };
+            if let Err(e) = self.do_the_render(&local_state) {
+                debug!("Rendering Error: {:?}", e);
+                debug!("Auto-restarting HalState...");
+                self.graphics_state.restart_halstate(local_state);
+            }
+
+            self.graphics_state.recreate_swapchain_if_necessary();
+        }
+    }
+
+    fn do_the_render(&mut self, local_state: &LocalState) -> Result<(), &'static str> {
+        let x = ((local_state.mouse_x / local_state.frame_width) * 2.0) - 1.0;
+        let y = ((local_state.mouse_y / local_state.frame_height) * 2.0) - 1.0;
+        let triangle = Triangle {
+            points: [[-0.5, 0.5], [-0.5, -0.5], [x as f32, y as f32]],
+        };
+
+        self.graphics_state.draw_triangle(triangle)
+    }
+
+    /// Runs the application's main loop function.
+    fn run(self) {
+        info!("Running application...");
+        self.main_loop();
     }
 }
