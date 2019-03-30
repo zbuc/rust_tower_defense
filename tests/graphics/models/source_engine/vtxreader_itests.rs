@@ -10,6 +10,8 @@ fn load_vtx() {
 
     // The first 4 bytes of a VTX file should be a version, 7 (OPTIMIZED_MODEL_FILE_VERSION)
     assert_eq!(vtxfile.header.version, 7);
+    assert_eq!(vtxfile.header.num_body_parts, 1);
+    assert_eq!(vtxfile.header.body_part_offset, 36);
 }
 
 #[test]

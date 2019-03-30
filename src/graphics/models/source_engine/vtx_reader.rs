@@ -39,22 +39,22 @@ pub struct VTXFileHeader
     pub version: i32,
 
 	// hardware params that affect how the model is to be optimized.
-	vertCacheSize: i32,
-	maxBonesPerStrip: u16,
-	maxBonesPerTri: u16,
-	maxBonesPerVert: i32,
+	vert_cache_size: i32,
+	max_bones_per_strip: u16,
+	max_bones_per_tri: u16,
+	max_bones_per_vert: i32,
 
 	// must match checkSum in the .mdl
-	checkSum: i32,
+	checksum: i32,
 
-	numLODs: i32, // Also specified in ModelHeader_t's and should match
+	num_LODs: i32, // Also specified in ModelHeader_t's and should match
 
 	// Offset to materialReplacementList Array. one of these for each LOD, 8 in total
-	materialReplacementListOffset: i32,
+	material_replacement_list_offset: i32,
 
     //Defines the size and location of the body part array
-	numBodyParts: i32,
-	bodyPartOffset: i32,
+	pub num_body_parts: i32,
+	pub body_part_offset: i32,
 }
 
 #[derive(Copy, Clone)]
