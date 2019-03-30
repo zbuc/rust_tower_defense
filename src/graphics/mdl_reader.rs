@@ -86,7 +86,7 @@ pub struct MDLFile {
  
 	// Node values appear to be single bytes, while their names are null-terminated strings.
 	localnode_count: i32,
-	localnode_index: i32,
+	pub localnode_index: i32,
 	localnode_name_index: i32,
  
 	// mstudioflexdesc_t

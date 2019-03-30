@@ -14,5 +14,11 @@ fn load_model() {
          mem::transmute::<[u8; 4], i32>(mdl_header)
     };
 
-    assert_eq!(model.id, mdl_header_i32)
+    assert_eq!(model.id, mdl_header_i32);
+}
+
+#[test]
+#[should_panic]
+fn load_invalid_model() {
+    mdl_reader::read_model_file_from_disk("source_assets/models/invalid_model.mdl").unwrap();
 }
