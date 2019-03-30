@@ -1,6 +1,31 @@
 use std::error::Error;
+use std::fmt;
 use std::fs::{File};
 use std::io::Read;
+use std::mem;
+
+#[derive(Debug)]
+pub struct MDLDeserializeError {
+    details: String
+}
+
+impl MDLDeserializeError {
+    fn new(msg: &str) -> MDLDeserializeError {
+        MDLDeserializeError{details: msg.to_string()}
+    }
+}
+
+impl fmt::Display for MDLDeserializeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f,"{}",self.details)
+    }
+}
+
+impl Error for MDLDeserializeError {
+    fn description(&self) -> &str {
+        &self.details
+    }
+}
 
 #[repr(C)]
 struct MDLVector(f32, f32, f32);
@@ -198,14 +223,30 @@ pub struct MDLFile {
 ///
 /// If there is any issue loading the model file from disk, an Err variant will
 /// be returned.
-pub fn read_model_file_from_disk(path: &str) -> Result<&MDLFile, Box<dyn Error>> {
-    let mut model_file = File::open(path)?;
+pub fn read_model_file_from_disk(path: &str) -> Result<&MDLFile, MDLDeserializeError> {
+    let mut model_file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) => return Err(MDLDeserializeError::new("Unable to open model file from disk")),
+    };
+
     let mut model_data_bytes = Vec::<u8>::new();
-    model_file.read_to_end(&mut model_data_bytes)?;
+    match model_file.read_to_end(&mut model_data_bytes) {
+        Ok(b) => b,
+        Err(e) => return Err(MDLDeserializeError::new("Error reading model file contents")),
+    };
 
     let data_ptr: *const u8 = model_data_bytes.as_ptr();
     let header_ptr: *const MDLFile = data_ptr as *const _;
     let header_ref: &MDLFile = unsafe { &*header_ptr };
+
+    let mdl_header: [u8; 4] = [0x49, 0x44, 0x53, 0x54];
+    let mdl_header_i32: i32 = unsafe {
+         mem::transmute::<[u8; 4], i32>(mdl_header)
+    };
+
+    if header_ref.id != mdl_header_i32 {
+        return Err(MDLDeserializeError::new("Model header not correct; expected [0x49, 0x44, 0x53, 0x54]"));
+    }
 
     Ok(header_ref)
 }
