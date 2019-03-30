@@ -32,11 +32,13 @@ impl Error for MDLDeserializeError {
 const MDL_HEADER: i32 = 1414743113;
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct MDLVector(f32, f32, f32);
 
 /// https://developer.valvesoftware.com/wiki/MDL
 #[repr(C)]
-pub struct MDLFile {
+#[derive(Copy, Clone)]
+pub struct MDLFileHeader {
     pub id: i32,		// Model format ID, such as "IDST" (0x49 0x44 0x53 0x54)
 	version: i32,	// Format version number, such as 48 (0x30,0x00,0x00,0x00)
 	checksum: i32,	// This has to be the same in the phy and vtx files to load!
@@ -219,6 +221,11 @@ pub struct MDLFile {
 	// As of this writing, the header is 408 bytes long in total
 }
 
+#[derive(Copy, Clone)]
+pub struct MDLFile {
+    pub header: MDLFileHeader,
+}
+
 /// Loads a Source Engine model file from disk and returns it parsed to an instance of the MDLFile struct.
 /// I pieced this together from publicly available documentation, e.g. https://developer.valvesoftware.com/wiki/MDL
 /// and reverse engineering the mdllib.dll included with Source SDK 2013 and used in the example hlmv.exe model viewer.
@@ -227,7 +234,7 @@ pub struct MDLFile {
 ///
 /// If there is any issue loading the model file from disk, an Err variant will
 /// be returned.
-pub fn read_model_file_from_disk(path: &str) -> Result<&MDLFile, MDLDeserializeError> {
+pub fn read_model_file_from_disk(path: &str) -> Result<MDLFile, MDLDeserializeError> {
     let mut model_file = match File::open(path) {
         Ok(f) => f,
         Err(_e) => return Err(MDLDeserializeError::new("Unable to open model file from disk")),
@@ -240,15 +247,17 @@ pub fn read_model_file_from_disk(path: &str) -> Result<&MDLFile, MDLDeserializeE
     };
 
     let data_ptr: *const u8 = model_data_bytes.as_ptr();
-    let header_ptr: *const MDLFile = data_ptr as *const _;
-    let header_ref: &MDLFile = unsafe { &*header_ptr };
+    let header_ptr: *const MDLFileHeader = data_ptr as *const _;
+    let header: &MDLFileHeader = unsafe { &*header_ptr };
 
-    if header_ref.id != MDL_HEADER {
+    if header.id != MDL_HEADER {
         return Err(MDLDeserializeError::new("Model header not correct; expected [0x49, 0x44, 0x53, 0x54]"));
     }
 
     // XXX there *really* should be actual checked deserialization here because this will produce unexpected behavior
     // for improperly formatted models -- but I'm *personally* only ever going to feed it good models ;)
 
-    Ok(header_ref)
+    Ok(MDLFile{
+        header: *header,
+    })
 }

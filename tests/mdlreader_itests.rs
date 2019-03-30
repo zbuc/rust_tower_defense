@@ -14,7 +14,7 @@ fn load_model() {
          mem::transmute::<[u8; 4], i32>(mdl_header)
     };
 
-    assert_eq!(model.id, mdl_header_i32);
+    assert_eq!(model.header.id, mdl_header_i32);
 }
 
 #[test]
