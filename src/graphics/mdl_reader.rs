@@ -1,8 +1,14 @@
+use std::error::Error;
+use std::fs::{File};
+use std::io::Read;
+
+#[repr(C)]
 struct MDLVector(f32, f32, f32);
 
 /// https://developer.valvesoftware.com/wiki/MDL
-struct MDLFile {
-    id: i32,		// Model format ID, such as "IDST" (0x49 0x44 0x53 0x54)
+#[repr(C)]
+pub struct MDLFile {
+    pub id: i32,		// Model format ID, such as "IDST" (0x49 0x44 0x53 0x54)
 	version: i32,	// Format version number, such as 48 (0x30,0x00,0x00,0x00)
 	checksum: i32,	// This has to be the same in the phy and vtx files to load!
 	name: [char; 64],		// The internal name of the model, padding with null bytes.
@@ -182,4 +188,24 @@ struct MDLFile {
 	unused3: i32, // ??
 	
 	// As of this writing, the header is 408 bytes long in total
+}
+
+/// Loads a Source Engine model file from disk and returns it parsed to an instance of the MDLFile struct.
+/// I pieced this together from publicly available documentation, e.g. https://developer.valvesoftware.com/wiki/MDL
+/// and reverse engineering the mdllib.dll included with Source SDK 2013 and used in the example hlmv.exe model viewer.
+///
+/// # Errors
+///
+/// If there is any issue loading the model file from disk, an Err variant will
+/// be returned.
+pub fn read_model_file_from_disk(path: &str) -> Result<&MDLFile, Box<dyn Error>> {
+    let mut model_file = File::open(path)?;
+    let mut model_data_bytes = Vec::<u8>::new();
+    model_file.read_to_end(&mut model_data_bytes)?;
+
+    let data_ptr: *const u8 = model_data_bytes.as_ptr();
+    let header_ptr: *const MDLFile = data_ptr as *const _;
+    let header_ref: &MDLFile = unsafe { &*header_ptr };
+
+    Ok(header_ref)
 }
