@@ -3,6 +3,8 @@ use std::fmt;
 use std::fs::{File};
 use std::io::Read;
 
+// https://developer.valvesoftware.com/wiki/Model
+
 #[derive(Debug)]
 pub struct MDLDeserializeError {
     details: String

@@ -2,7 +2,7 @@ extern crate rust_tower_defense;
 
 use std::mem;
 
-use rust_tower_defense::graphics::mdl_reader;
+use rust_tower_defense::graphics::models::source_engine::mdl_reader;
 
 #[test]
 fn load_model() {

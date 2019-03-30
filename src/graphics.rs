@@ -1,4 +1,4 @@
-pub mod mdl_reader;
+pub mod models;
 
 extern crate winit;
 extern crate cgmath;
@@ -32,6 +32,8 @@ use cgmath::{Matrix3, Matrix4, Point3, Vector3, Rad};
 use std::iter;
 use std::sync::Arc;
 use std::time::Instant;
+
+use models::source_engine::mdl_reader;
 
 
 #[derive(Copy, Clone)]
