@@ -15,6 +15,8 @@ fn load_vtx() {
     assert_eq!(mem::size_of::<vtx_reader::VTXFileHeader>() as i32, vtxfile.header.body_part_offset);
 
     assert_eq!(vtxfile.bodyparts.len(), 1);
+    assert_eq!(vtxfile.bodyparts[0].header.num_models, 1);
+    assert_eq!(vtxfile.bodyparts[0].header.model_offset, 8);
 }
 
 #[test]

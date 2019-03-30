@@ -62,17 +62,38 @@ pub struct VTXFileHeader
 pub struct VTXFileBodyPartHeader
 {
 	//Model array
-	num_models: i32,
-	model_offset: i32,
+	pub num_models: i32,
+	pub model_offset: i32,
+}
+
+// This maps one to one with models in the mdl file.
+#[derive(Copy, Clone)]
+pub struct VTXFileModelHeader
+{
+	// LOD mesh array
+	pub num_lods: i32,   //T his is also specified in FileHeader_t
+	pub lodOffset: i32,
+}
+
+#[derive(Clone)]
+pub struct Model {
+    pub header: VTXFileModelHeader,
+}
+
+#[derive(Clone)]
+pub struct BodyPart {
+    pub header: VTXFileBodyPartHeader,
+    pub models: Vec<Model>,
 }
 
 #[derive(Clone)]
 pub struct VTXFile {
     pub header: VTXFileHeader,
-    pub bodyparts: Vec<VTXFileBodyPartHeader>,
+    pub bodyparts: Vec<BodyPart>,
 }
 
 /// Loads a Source Engine vtx file from disk and returns it parsed to an instance of the VTXFile struct.
+/// https://github.com/ValveSoftware/source-sdk-2013/blob/master/sp/src/public/optimize.h
 ///
 /// # Errors
 ///
@@ -99,18 +120,37 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
         return Err(VTXDeserializeError::new("VTX version not correct; expected 7"));
     }
 
+    let mut bodyparts: Vec<BodyPart> = Vec::new();
     let mut bodypart_headers: Vec<VTXFileBodyPartHeader> = Vec::new();
 
     for x in 0..header.num_body_parts {
         debug!("Loading body part {}", x);
-        let start_index = ((x+1) * 36) as usize;
-        let end_index = start_index + mem::size_of::<VTXFileBodyPartHeader>();
+        let bodypart_start_index = (x+1) as usize * mem::size_of::<VTXFileHeader>();
+        let bodypart_end_index = bodypart_start_index + mem::size_of::<VTXFileBodyPartHeader>();
 
-        let bodyparts_data_ptr: *const u8 = vtx_data_bytes[start_index..end_index].as_ptr();
+        let bodyparts_data_ptr: *const u8 = vtx_data_bytes[bodypart_start_index..bodypart_end_index].as_ptr();
         let bodyparts_ptr: *const VTXFileBodyPartHeader = bodyparts_data_ptr as *const _;
         let bodyparts_header: &VTXFileBodyPartHeader = unsafe { &*bodyparts_ptr };
 
-        bodypart_headers.push(*bodyparts_header);
+        let mut models: Vec<Model> = Vec::new();
+
+        for y in 0..bodyparts_header.num_models {
+            let model_start_index = bodypart_start_index + ((y + 1) * bodyparts_header.model_offset) as usize;
+            let model_end_index = model_start_index + mem::size_of::<VTXFileModelHeader>();
+
+            let model_data_ptr: *const u8 = vtx_data_bytes[model_start_index..model_end_index].as_ptr();
+            let model_ptr: *const VTXFileModelHeader = model_data_ptr as *const _;
+            let model_header: &VTXFileModelHeader = unsafe { &*model_ptr };
+
+            models.push(Model {
+                header: *model_header,
+            });
+        }
+
+        bodyparts.push(BodyPart {
+            header: *bodyparts_header,
+            models: models,
+        });
     }
 
     // XXX there *really* should be actual checked deserialization here because this will produce unexpected behavior
@@ -118,6 +158,6 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
 
     Ok(VTXFile{
         header: *header,
-        bodyparts: bodypart_headers,
+        bodyparts: bodyparts,
     })
 }
