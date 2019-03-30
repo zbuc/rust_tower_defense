@@ -48,7 +48,7 @@ pub struct VTXFileHeader
 	// must match checkSum in the .mdl
 	checksum: i32,
 
-	num_LODs: i32, // Also specified in ModelHeader_t's and should match
+	num_lods: i32, // Also specified in ModelHeader_t's and should match
 
 	// Offset to materialReplacementList Array. one of these for each LOD, 8 in total
 	material_replacement_list_offset: i32,
@@ -94,14 +94,23 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
     let header_ptr: *const VTXFileHeader = header_data_ptr as *const _;
     let header: &VTXFileHeader = unsafe { &*header_ptr };
 
-    let bodyparts_data_ptr: *const u8 = vtx_data_bytes[36..36 + mem::size_of::<VTXFileBodyPartHeader>()].as_ptr();
-    let bodyparts_ptr: *const VTXFileBodyPartHeader = bodyparts_data_ptr as *const _;
-    let bodyparts: &VTXFileBodyPartHeader = unsafe { &*bodyparts_ptr };
-
-
     // The first 4 bytes of a VTX file should be a version, 7 (OPTIMIZED_MODEL_FILE_VERSION)
     if header.version != OPTIMIZED_MODEL_FILE_VERSION {
         return Err(VTXDeserializeError::new("VTX version not correct; expected 7"));
+    }
+
+    let mut bodypart_headers: Vec<VTXFileBodyPartHeader> = Vec::new();
+
+    for x in 0..header.num_body_parts {
+        debug!("Loading body part {}", x);
+        let start_index = ((x+1) * 36) as usize;
+        let end_index = start_index + mem::size_of::<VTXFileBodyPartHeader>();
+
+        let bodyparts_data_ptr: *const u8 = vtx_data_bytes[start_index..end_index].as_ptr();
+        let bodyparts_ptr: *const VTXFileBodyPartHeader = bodyparts_data_ptr as *const _;
+        let bodyparts_header: &VTXFileBodyPartHeader = unsafe { &*bodyparts_ptr };
+
+        bodypart_headers.push(*bodyparts_header);
     }
 
     // XXX there *really* should be actual checked deserialization here because this will produce unexpected behavior
@@ -109,6 +118,6 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
 
     Ok(VTXFile{
         header: *header,
-        bodyparts: vec![*bodyparts],
+        bodyparts: bodypart_headers,
     })
 }
