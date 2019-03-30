@@ -298,12 +298,14 @@ pub const INDICES: [u16; 642] = [
 ];
 
 pub fn run() {
+    let model = mdl_reader::read_model_file_from_disk("source_assets/models/ctm_sas_varianta.mdl").unwrap();
+    info!("Model id {}", model.header.id);
 
     let extensions = vulkano_win::required_extensions();
     let instance = Instance::new(None, &extensions, None).unwrap();
 
     let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
-    println!("Using device: {} (type: {:?})", physical.name(), physical.ty());
+    info!("Using device: {} (type: {:?})", physical.name(), physical.ty());
 
     let mut events_loop = winit::EventsLoop::new();
     let surface = winit::WindowBuilder::new().build_vk_surface(&events_loop, instance.clone()).unwrap();
@@ -473,7 +475,7 @@ pub fn run() {
                 previous_frame = Box::new(sync::now(device.clone())) as Box<_>;
             }
             Err(e) => {
-                println!("{:?}", e);
+                error!("{:?}", e);
                 previous_frame = Box::new(sync::now(device.clone())) as Box<_>;
             }
         }

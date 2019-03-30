@@ -257,6 +257,16 @@ pub fn read_model_file_from_disk(path: &str) -> Result<MDLFile, MDLDeserializeEr
     // XXX there *really* should be actual checked deserialization here because this will produce unexpected behavior
     // for improperly formatted models -- but I'm *personally* only ever going to feed it good models ;)
 
+    if header.studiohdr2index == 408 {
+        // additional header directly follows this header
+        info!("studiohdr2index exists directly following main header");
+    } else if header.studiohdr2index == 0 {
+        // no additional header
+        info!("no additional header");
+    } else {
+        info!("additional header at {}", header.studiohdr2index);
+    }
+
     Ok(MDLFile{
         header: *header,
     })
