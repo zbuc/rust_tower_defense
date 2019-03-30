@@ -17,7 +17,7 @@ extern crate gfx_backend_gl as back;
 extern crate gfx_backend_metal as back;
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
-extern crate gfx_hal as hal;
+extern crate gfx_backend_vulkan as back;
 extern crate log;
 
 extern crate glsl_to_spirv;
@@ -31,9 +31,7 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::thread;
 
-use arrayvec::ArrayVec;
-use core::mem::{size_of, ManuallyDrop};
-use hal::{
+use crate::hal::{
     adapter::{Adapter, MemoryTypeId, PhysicalDevice},
     buffer::Usage as BufferUsage,
     command::{ClearColor, ClearValue, CommandBuffer, MultiShot, Primary},
@@ -48,12 +46,15 @@ use hal::{
         ColorMask, DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding, Element, EntryPoint,
         Face, Factor, FrontFace, GraphicsPipelineDesc, GraphicsShaderSet, InputAssemblerDesc,
         LogicOp, PipelineCreationFlags, PipelineStage, PolygonMode, Rasterizer, Rect,
-        ShaderStageFlags, Specialization, StencilTest, VertexBufferDesc, Viewport,
+        ShaderStageFlags, Specialization, StencilTest, VertexBufferDesc, VertexInputRate, Viewport,
     },
     queue::{self, family::QueueGroup, Submission},
-    window::{Backbuffer, Extent2D, FrameSync, PresentMode, Swapchain, SwapchainConfig},
+    window::{Backbuffer, Extent2D, PresentMode, Swapchain, SwapchainConfig},
     Backend, Gpu, Graphics, Instance, Primitive, QueueFamily, Surface,
 };
+use arrayvec::ArrayVec;
+use core::mem::{size_of, ManuallyDrop};
+use winit::dpi::LogicalSize;
 use winit::{dpi, Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 //use log::Level;
@@ -81,24 +82,6 @@ const MAX_FRAMES_IN_FLIGHT: usize = 2;
 static WINDOW_NAME: &str = "Rust Tower Defense 0.1.0";
 static SHADER_DIR: &str = "./assets/gen/shaders/";
 
-/// Runs the main graphics event loop.
-///
-/// Exits when the window is closed.
-/// Eventually we'll have a command system responsible
-/// for telling the window to close.
-pub fn run() {
-    // if building in debug mode, vulkan backend initializes standard validation layers
-    // all we need to do is enable logging
-    // run the program like so to print all logs of level 'warn' and above:
-    // bash: RUST_LOG=warn && cargo run --bin 02_validation_layers --features vulkan
-    // powershell: $env:RUST_LOG="warn"; cargo run --bin 02_validation_layers --features vulkan
-    // see: https://docs.rs/env_logger/0.5.13/env_logger/
-    env_logger::init();
-    info!("Starting the application!");
-    let application = RustTowerDefenseApplication::init();
-    application.run();
-}
-
 /// Holds configuration flags for the window.
 struct WindowConfig {
     is_maximized: bool,
@@ -109,14 +92,23 @@ struct WindowConfig {
 }
 
 /// The state object for the window.
-struct WindowState {
-    events_loop: Option<EventsLoop>,
+pub struct WindowState {
+    pub events_loop: Option<EventsLoop>,
     window: Window,
     window_config: RefCell<WindowConfig>,
 }
 
+impl WindowState {
+    pub fn get_frame_size(&self) -> (f64, f64) {
+        self.window
+            .get_inner_size()
+            .map(|logical| logical.into())
+            .unwrap_or((0.0, 0.0))
+    }
+}
+
 /// The state object for the graphics backend.
-struct HalState {
+pub struct HalState {
     buffer: ManuallyDrop<<back::Backend as Backend>::Buffer>,
     memory: ManuallyDrop<<back::Backend as Backend>::Memory>,
     descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout>,
@@ -193,6 +185,426 @@ impl core::ops::Drop for HalState {
     }
 }
 
+pub struct GraphicsState {
+    pub hal_state: HalState,
+    pub window_state: WindowState,
+}
+
+impl GraphicsState {
+    pub fn init() -> Self {
+        let window_state = Self::init_window();
+        let hal_state = Self::init_hal_state(&window_state);
+
+        Self {
+            hal_state: hal_state,
+            window_state: window_state,
+        }
+    }
+
+    fn init_hal_state(window_state: &WindowState) -> HalState {
+        let hal_state = match HalState::new(&window_state.window) {
+            Ok(state) => state,
+            Err(e) => panic!(e),
+        };
+        hal_state
+    }
+
+    // https://github.com/tomaka/winit/blob/master/examples/fullscreen.rs
+    fn get_monitor(events_loop: &winit::EventsLoop) -> Option<winit::MonitorId> {
+        #[cfg(target_os = "macos")]
+        let mut macos_use_simple_fullscreen = false;
+
+        // On macOS there are two fullscreen modes "native" and "simple"
+        #[cfg(target_os = "macos")]
+        {
+            print!("Please choose the fullscreen mode: (1) native, (2) simple: ");
+            io::stdout().flush().unwrap();
+
+            let mut num = String::new();
+            io::stdin().read_line(&mut num).unwrap();
+            let num = num.trim().parse().ok().expect("Please enter a number");
+            match num {
+                2 => macos_use_simple_fullscreen = true,
+                _ => {}
+            }
+
+            // Prompt for monitor when using native fullscreen
+            if !macos_use_simple_fullscreen {
+                debug!("No simple fullscreen");
+                Some(RustTowerDefenseApplication::prompt_for_monitor(
+                    &events_loop,
+                ))
+            } else {
+                debug!("Yes simple fullscreen");
+                None
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        Some(Self::prompt_for_monitor(&events_loop))
+    }
+
+    /// Enumerate monitors and prompt user to choose one
+    fn prompt_for_monitor(events_loop: &winit::EventsLoop) -> winit::MonitorId {
+        for (num, monitor) in events_loop.get_available_monitors().enumerate() {
+            println!("Monitor #{}: {:?}", num, monitor.get_name());
+        }
+
+        print!("Please write the number of the monitor to use: ");
+        io::stdout().flush().unwrap();
+
+        let mut num = String::new();
+        io::stdin().read_line(&mut num).unwrap();
+        let num = num.trim().parse().ok().expect("Please enter a number");
+        let monitor = events_loop
+            .get_available_monitors()
+            .nth(num)
+            .expect("Please enter a valid ID");
+
+        println!("Using {:?}", monitor.get_name());
+
+        monitor
+    }
+    /// Initializes the window state. Creates a new event loop, builds the window
+    /// at the desired resolution, sets the title, and returns the newly created window
+    /// with those parameters.
+    ///
+    /// ## Failure
+    /// It's possible for the window creation to fail.
+    fn init_window() -> WindowState {
+        let tid = thread::current().id();
+        debug!("thread ID (init_window) {:#?}", tid);
+        let events_loop = EventsLoop::new();
+
+        let monitor = Self::get_monitor(&events_loop);
+
+        debug!("Monitor: {:#?}", monitor);
+        let window_builder = WindowBuilder::new()
+            .with_fullscreen(monitor)
+            .with_dimensions(dpi::LogicalSize::new(2880., 1800.))
+            .with_resizable(false)
+            .with_title(WINDOW_NAME.to_string());
+        let window = window_builder.build(&events_loop).unwrap();
+        window.set_maximized(true);
+        window.set_fullscreen(Some(window.get_current_monitor()));
+
+        let window_config = RefCell::new(WindowConfig {
+            is_fullscreen: false,
+            is_maximized: true,
+            decorations: true,
+            #[cfg(target_os = "macos")]
+            macos_use_simple_fullscreen: false,
+        });
+
+        WindowState {
+            events_loop: Some(events_loop),
+            window: window,
+            window_config,
+        }
+    }
+
+    pub fn restart_halstate(&mut self, _local_state: LocalState) {
+        // XXX This actually isn't a great implementation, we want to keep
+        // what state we can, but this is easier to implement.
+        //let hal_state = HalState::new(&self.window_state.window).unwrap();
+        //drop(self.hal_state);
+        //mem::replace(&mut self.hal_state, hal_state);
+        let tid = thread::current().id();
+        debug!("thread ID (events_loop1) {:#?}", tid);
+        self.hal_state.should_recreate_swapchain = true;
+        // drop(self.hal_state);
+        // self.hal_state = HalState::new(&self.window_state.window).unwrap();
+    }
+
+    pub fn draw_triangle(&mut self, triangle: Triangle) -> Result<(), &'static str> {
+        self.hal_state.borrow_mut().draw_triangle_frame(triangle)
+    }
+
+    pub fn recreate_swapchain_if_necessary(&mut self) {
+        if !self.hal_state.should_recreate_swapchain {
+            return;
+        }
+
+        debug!("Have to recreate swapchain...");
+        self.hal_state.device.wait_idle().unwrap();
+
+        let (caps, formats, _present_modes) = self
+            .hal_state
+            .surface
+            .compatibility(&mut self.hal_state.adapter.physical_device);
+        // Verify that previous format still exists so we may reuse it.
+        assert!(formats.iter().any(|fs| fs.contains(&self.hal_state.format)));
+
+        // XXX TODO change this hardcoded dimension so we can support resize, see
+        // https://github.com/gfx-rs/gfx/blob/afd03b752ca2a9d24b65de8ef293d58fd52ee4f2/examples/quad/main.rs
+        // let swapchain_config = SwapchainConfig {
+        //     present_mode,
+        //     composite_alpha,
+        //     format,
+        //     extent,
+        //     image_count,
+        //     image_layers,
+        //     image_usage,
+        // };
+        let extent = {
+            Extent2D {
+                width: 2880,
+                height: 1800,
+            }
+        };
+        let swap_config = SwapchainConfig::from_caps(&caps, self.hal_state.format, extent);
+        println!("{:?}", swap_config);
+        let extent = swap_config.extent.to_extent();
+
+        let (new_swap_chain, new_backbuffer) = unsafe {
+            self.hal_state.device.create_swapchain(
+                &mut self.hal_state.surface,
+                swap_config,
+                None,
+                // XXX TODO not sure what this implies, auto-drop?
+                //Some(self.hal_state.swapchain),
+            )
+        }
+        .expect("Can't create swapchain");
+
+        unsafe {
+            // Clean up the old framebuffers, images and swapchain
+            &self.hal_state.cleanup_framebuffers();
+        }
+
+        // XXX TODO IDK??? do i need to drop this? it's manuallydrop
+        //drop(self.hal_state.swapchain);
+        self.hal_state.swapchain = ManuallyDrop::new(new_swap_chain);
+
+        let (new_frame_images, new_framebuffers) = match new_backbuffer {
+            Backbuffer::Images(images) => {
+                let imageviews = images
+                    .into_iter()
+                    .map(|image| unsafe {
+                        let rtv = self
+                            .hal_state
+                            .device
+                            .create_image_view(
+                                &image,
+                                ViewKind::D2,
+                                self.hal_state.format,
+                                Swizzle::NO,
+                                SubresourceRange {
+                                    aspects: Aspects::COLOR,
+                                    levels: 0..1,
+                                    layers: 0..1,
+                                },
+                            )
+                            .unwrap();
+                        rtv
+                    })
+                    .collect::<Vec<_>>();
+                let fbos = imageviews
+                    .iter()
+                    .map(|&ref rtv| unsafe {
+                        self.hal_state
+                            .device
+                            .create_framebuffer(&self.hal_state.render_pass, Some(rtv), extent)
+                            .unwrap()
+                    })
+                    .collect();
+                (imageviews, fbos)
+            }
+            Backbuffer::Framebuffer(fbo) => (Vec::new(), vec![fbo]),
+        };
+
+        self.hal_state.framebuffers = new_framebuffers;
+        self.hal_state.image_views = new_frame_images;
+        // XXX TODO for resize vvv
+        // self.hal_state.viewport.rect.w = extent.width as _;
+        // self.hal_state.viewport.rect.h = extent.height as _;
+        self.hal_state.should_recreate_swapchain = false;
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn create_pipeline(
+    device: &mut back::Device,
+    extent: Extent2D,
+    render_pass: &<back::Backend as Backend>::RenderPass,
+) -> Result<
+    (
+        Vec<<back::Backend as Backend>::DescriptorSetLayout>,
+        <back::Backend as Backend>::PipelineLayout,
+        <back::Backend as Backend>::GraphicsPipeline,
+    ),
+    &'static str,
+> {
+    let mut compiler = shaderc::Compiler::new().ok_or("shaderc not found!")?;
+    let vertex_compile_artifact = compiler
+        .compile_into_spirv(
+            VERTEX_SOURCE,
+            shaderc::ShaderKind::Vertex,
+            "vertex.vert",
+            "main",
+            None,
+        )
+        .map_err(|_| "Couldn't compile vertex shader!")?;
+    let fragment_compile_artifact = compiler
+        .compile_into_spirv(
+            FRAGMENT_SOURCE,
+            shaderc::ShaderKind::Fragment,
+            "fragment.frag",
+            "main",
+            None,
+        )
+        .map_err(|e| {
+            error!("{}", e);
+            "Couldn't compile fragment shader!"
+        })?;
+    let vertex_shader_module = unsafe {
+        device
+            .create_shader_module(vertex_compile_artifact.as_binary_u8())
+            .map_err(|_| "Couldn't make the vertex module")?
+    };
+    let fragment_shader_module = unsafe {
+        device
+            .create_shader_module(fragment_compile_artifact.as_binary_u8())
+            .map_err(|_| "Couldn't make the fragment module")?
+    };
+    let (descriptor_set_layouts, pipeline_layout, gfx_pipeline) = {
+        let (vs_entry, fs_entry) = (
+            EntryPoint {
+                entry: "main",
+                module: &vertex_shader_module,
+                specialization: Specialization {
+                    constants: &[],
+                    data: &[],
+                },
+            },
+            EntryPoint {
+                entry: "main",
+                module: &fragment_shader_module,
+                specialization: Specialization {
+                    constants: &[],
+                    data: &[],
+                },
+            },
+        );
+        let shaders = GraphicsShaderSet {
+            vertex: vs_entry,
+            hull: None,
+            domain: None,
+            geometry: None,
+            fragment: Some(fs_entry),
+        };
+
+        let input_assembler = InputAssemblerDesc::new(Primitive::TriangleList);
+
+        let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
+            binding: 0,
+            stride: (size_of::<f32>() * 2) as u32,
+            rate: VertexInputRate::Vertex,
+        }];
+        let attributes: Vec<AttributeDesc> = vec![AttributeDesc {
+            location: 0,
+            binding: 0,
+            element: Element {
+                format: Format::Rg32Sfloat,
+                offset: 0,
+            },
+        }];
+
+        let rasterizer = Rasterizer {
+            depth_clamping: false,
+            polygon_mode: PolygonMode::Fill,
+            cull_face: Face::NONE,
+            front_face: FrontFace::Clockwise,
+            depth_bias: None,
+            conservative: false,
+        };
+
+        let depth_stencil = DepthStencilDesc {
+            depth: DepthTest::Off,
+            depth_bounds: false,
+            stencil: StencilTest::Off,
+        };
+
+        let blender = {
+            let blend_state = BlendState::On {
+                color: BlendOp::Add {
+                    src: Factor::One,
+                    dst: Factor::Zero,
+                },
+                alpha: BlendOp::Add {
+                    src: Factor::One,
+                    dst: Factor::Zero,
+                },
+            };
+            BlendDesc {
+                logic_op: Some(LogicOp::Copy),
+                targets: vec![ColorBlendDesc(ColorMask::ALL, blend_state)],
+            }
+        };
+
+        let baked_states = BakedStates {
+            viewport: Some(Viewport {
+                rect: extent.to_extent().rect(),
+                depth: (0.0..1.0),
+            }),
+            scissor: Some(extent.to_extent().rect()),
+            blend_color: None,
+            depth_bounds: None,
+        };
+
+        let bindings = Vec::<DescriptorSetLayoutBinding>::new();
+        let immutable_samplers = Vec::<<back::Backend as Backend>::Sampler>::new();
+        let descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout> =
+            vec![unsafe {
+                device
+                    .create_descriptor_set_layout(bindings, immutable_samplers)
+                    .map_err(|_| "Couldn't make a DescriptorSetLayout")?
+            }];
+        let push_constants = Vec::<(ShaderStageFlags, core::ops::Range<u32>)>::new();
+        let layout = unsafe {
+            device
+                .create_pipeline_layout(&descriptor_set_layouts, push_constants)
+                .map_err(|_| "Couldn't create a pipeline layout")?
+        };
+
+        let gfx_pipeline = {
+            let desc = GraphicsPipelineDesc {
+                shaders,
+                rasterizer,
+                vertex_buffers,
+                attributes,
+                input_assembler,
+                blender,
+                depth_stencil,
+                multisampling: None,
+                baked_states,
+                layout: &layout,
+                subpass: Subpass {
+                    index: 0,
+                    main_pass: render_pass,
+                },
+                flags: PipelineCreationFlags::empty(),
+                parent: BasePipeline::None,
+            };
+
+            unsafe {
+                device
+                    .create_graphics_pipeline(&desc, None)
+                    .map_err(|_| "Couldn't create a graphics pipeline!")?
+            }
+        };
+
+        (descriptor_set_layouts, layout, gfx_pipeline)
+    };
+
+    unsafe {
+        device.destroy_shader_module(vertex_shader_module);
+        device.destroy_shader_module(fragment_shader_module);
+    }
+
+    Ok((descriptor_set_layouts, pipeline_layout, gfx_pipeline))
+}
+
 impl HalState {
     pub fn new(window: &Window) -> Result<Self, &'static str> {
         // Create An Instance
@@ -214,20 +626,12 @@ impl HalState {
 
         // Open A Device and take out a QueueGroup
         let (mut device, queue_group) = {
-            let queue_family = adapter
-                .queue_families
-                .iter()
-                .find(|qf| qf.supports_graphics() && surface.supports_queue_family(qf))
-                .ok_or("Couldn't find a QueueFamily with graphics!")?;
-            let Gpu { device, mut queues } = unsafe {
-                adapter
-                    .physical_device
-                    .open(&[(&queue_family, &[1.0; 1])])
-                    .map_err(|_| "Couldn't open the PhysicalDevice!")?
-            };
-            let queue_group = queues
-                .take::<Graphics>(queue_family.id())
-                .ok_or("Couldn't take ownership of the QueueGroup!")?;
+            let (device, queue_group) = adapter
+                .open_with::<_, hal::Graphics>(1, |queue_family| {
+                    surface.supports_queue_family(queue_family)
+                })
+                .unwrap();
+
             if !queue_group.queues.is_empty() {
                 Ok(())
             } else {
@@ -353,7 +757,7 @@ impl HalState {
 
         // Build our pipeline and vertex buffer
         let (descriptor_set_layouts, pipeline_layout, graphics_pipeline) =
-            RustTowerDefenseApplication::create_pipeline(&mut device, extent, &render_pass)?;
+            create_pipeline(&mut device, extent, &render_pass)?;
         let (buffer, memory, requirements) = unsafe {
             const F32_XY_TRIANGLE: u64 = (size_of::<f32>() * 2 * 3) as u64;
             let mut buffer = device
@@ -433,13 +837,13 @@ impl HalState {
     }
 
     fn build_swapchain(
-        mut surface: &mut back::Surface,
+        mut surface: &mut <back::Backend as Backend>::Surface,
         adapter: &Adapter<back::Backend>,
         window: &Window,
         device: &back::Device,
     ) -> Result<
         (
-            back::Swapchain,
+            <back::Backend as Backend>::Swapchain,
             Extent2D,
             Backbuffer<back::Backend>,
             Format,
@@ -447,12 +851,12 @@ impl HalState {
         ),
         &'static str,
     > {
-        let (caps, preferred_formats, present_modes, composite_alphas) =
+        let (caps, preferred_formats, present_modes) =
             surface.compatibility(&adapter.physical_device);
         info!("{:?}", caps);
         info!("Preferred Formats: {:?}", preferred_formats);
         info!("Present Modes: {:?}", present_modes);
-        info!("Composite Alphas: {:?}", composite_alphas);
+        //info!("Composite Alphas: {:?}", composite_alphas);
         //
         let present_mode = {
             use gfx_hal::window::PresentMode::*;
@@ -463,14 +867,15 @@ impl HalState {
                 .ok_or("No PresentMode values specified!")?
         };
 
-        let composite_alpha = {
-            use gfx_hal::window::CompositeAlpha::*;
-            [Opaque, Inherit, PreMultiplied, PostMultiplied]
-                .iter()
-                .cloned()
-                .find(|ca| composite_alphas.contains(ca))
-                .ok_or("No CompositeAlpha values specified!")?
-        };
+        // XXX TODO figure out composite alpha
+        // let composite_alpha = {
+        //     use hal::CompositeAlpha;
+        //     [CompositeAlpha::Opaque, CompositeAlpha::Inherit, CompositeAlpha::PreMultiplied, CompositeAlpha::PostMultiplied]
+        //         .iter()
+        //         .cloned()
+        //         .find(|ca| composite_alphas.contains(ca))
+        //         .ok_or("No CompositeAlpha values specified!")?
+        // };
         let format = match preferred_formats {
             None => Format::Rgba8Srgb,
             Some(formats) => match formats
@@ -504,22 +909,17 @@ impl HalState {
         } else {
             (caps.image_count.end - 1).min(2)
         };
-        let image_layers = 1;
-        let image_usage = if caps.usage.contains(Usage::COLOR_ATTACHMENT) {
-            Usage::COLOR_ATTACHMENT
-        } else {
-            Err("The Surface isn't capable of supporting color!")?
-        };
         debug!("Present mode: {:#?}", present_mode);
-        let swapchain_config = SwapchainConfig {
-            present_mode,
-            composite_alpha,
-            format,
-            extent,
-            image_count,
-            image_layers,
-            image_usage,
-        };
+        let swapchain_config = SwapchainConfig::from_caps(&caps, format, extent);
+        // let swapchain_config = SwapchainConfig {
+        //     present_mode,
+        //     //composite_alpha,
+        //     format,
+        //     extent,
+        //     image_count,
+        //     image_layers,
+        //     image_usage,
+        // };
         info!("{:?}", swapchain_config);
         //
         let (swapchain, backbuffer) = unsafe {
@@ -542,7 +942,8 @@ impl HalState {
         let (i_u32, i_usize) = unsafe {
             let image_index = self
                 .swapchain
-                .acquire_image(core::u64::MAX, FrameSync::Semaphore(image_available))
+                // .acquire_image(core::u64::MAX, FrameSync::Semaphore(image_available))
+                .acquire_image(!0, Some(image_available), None)
                 .map_err(|_| "Couldn't acquire an image from the swapchain!")?;
             (image_index, image_index as usize)
         };
@@ -607,7 +1008,11 @@ impl HalState {
         };
         let the_command_queue = &mut self.queue_group.queues[0];
         unsafe {
+            // The list of work in the CommandBuffer is sent to the GPU and processed.
             the_command_queue.submit(submission, Some(flight_fence));
+
+            // This is where something actually gets drawn! The swapchain waits for the
+            // work submitted to the GPU to finish processing, and then displays the results.
             self.swapchain
                 .present(the_command_queue, i_u32, present_wait_semaphores)
                 .map_err(|e| {
@@ -631,6 +1036,7 @@ pub enum UserInput {
 impl UserInput {
     pub fn poll_events_loop(events_loop: &mut EventsLoop) -> Option<Self> {
         let mut output = UserInput::Noop;
+        // XXX should maybe make default method instead?
         // let mut output = UserInput::default();
         events_loop.poll_events(|event| match event {
             Event::WindowEvent {
@@ -651,29 +1057,24 @@ impl UserInput {
             } => {
                 output = UserInput::NewMousePosition(Some((position.x, position.y)));
             }
-            Event::WindowEvent { event, .. } => (),
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::KeyboardInput {
+                    input:
+                        winit::KeyboardInput {
+                            virtual_keycode: Some(virtual_code),
+                            state,
+                            ..
+                        },
+                    ..
+                } => match (virtual_code, state) {
+                    (winit::VirtualKeyCode::Escape, _) => {
+                        output = UserInput::EndRequested;
+                    }
+                    _ => (),
+                },
+                _ => (),
+            },
             _ => (),
-            // } => match event {
-            //     WindowEvent::KeyboardInput {
-            //         input:
-            //             winit::KeyboardInput {
-            //                 virtual_keycode: Some(virtual_code),
-            //                 state,
-            //                 ..
-            //             },
-            //         ..
-            //     } => match (virtual_code, state) {
-            //         (winit::VirtualKeyCode::Escape, _) => {
-            //             debug!("ESC");
-            //         },
-            //         _ => {
-            //             debug!("Keypress: {:#?}", virtual_code);
-            //             Some(UserInput::keypress(1))
-            //         }
-            //     }
-            //     // _ => (),
-            // }
-            // _ => UserInput::noop,
         });
         match output {
             UserInput::Noop => None,
@@ -733,133 +1134,13 @@ impl QueueFamilyIds {
     }
 }
 
-/// The application contains the window and graphics
-/// drivers' states. This is the main interface to interact
-/// with the application. We would probably expand this to be
-/// the systems' manager at some point, or reference it from
-/// the systems' manager.
-struct RustTowerDefenseApplication {
-    hal_state: HalState,
-    window_state: WindowState,
-}
-
-type ShaderData = Vec<u8>;
-
-impl RustTowerDefenseApplication {
+pub trait GraphicalGame {
     /// Initialize a new instance of the application. Will initialize the
-    /// window and graphics state, and then return a new RustTowerDefenseApplication.
-    pub fn init() -> RustTowerDefenseApplication {
-        let window_state = RustTowerDefenseApplication::init_window();
-        let mut hal_state = match HalState::new(&window_state.window) {
-            Ok(state) => state,
-            Err(e) => panic!(e),
-        };
-
-        RustTowerDefenseApplication {
-            hal_state: hal_state,
-            window_state,
-        }
-    }
-
-    // https://github.com/tomaka/winit/blob/master/examples/fullscreen.rs
-    fn get_monitor(events_loop: &winit::EventsLoop) -> Option<winit::MonitorId> {
-        #[cfg(target_os = "macos")]
-        let mut macos_use_simple_fullscreen = false;
-
-        // On macOS there are two fullscreen modes "native" and "simple"
-        #[cfg(target_os = "macos")]
-        {
-            print!("Please choose the fullscreen mode: (1) native, (2) simple: ");
-            io::stdout().flush().unwrap();
-
-            let mut num = String::new();
-            io::stdin().read_line(&mut num).unwrap();
-            let num = num.trim().parse().ok().expect("Please enter a number");
-            match num {
-                2 => macos_use_simple_fullscreen = true,
-                _ => {}
-            }
-
-            // Prompt for monitor when using native fullscreen
-            if !macos_use_simple_fullscreen {
-                debug!("No simple fullscreen");
-                Some(RustTowerDefenseApplication::prompt_for_monitor(
-                    &events_loop,
-                ))
-            } else {
-                debug!("Yes simple fullscreen");
-                None
-            }
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        Some(RustTowerDefenseApplication::prompt_for_monitor(
-            &events_loop,
-        ))
-    }
-
-    /// Enumerate monitors and prompt user to choose one
-    fn prompt_for_monitor(events_loop: &winit::EventsLoop) -> winit::MonitorId {
-        for (num, monitor) in events_loop.get_available_monitors().enumerate() {
-            println!("Monitor #{}: {:?}", num, monitor.get_name());
-        }
-
-        print!("Please write the number of the monitor to use: ");
-        io::stdout().flush().unwrap();
-
-        let mut num = String::new();
-        io::stdin().read_line(&mut num).unwrap();
-        let num = num.trim().parse().ok().expect("Please enter a number");
-        let monitor = events_loop
-            .get_available_monitors()
-            .nth(num)
-            .expect("Please enter a valid ID");
-
-        println!("Using {:?}", monitor.get_name());
-
-        monitor
-    }
-
-    /// Initializes the window state. Creates a new event loop, builds the window
-    /// at the desired resolution, sets the title, and returns the newly created window
-    /// with those parameters.
-    ///
-    /// ## Failure
-    /// It's possible for the window creation to fail.
-    fn init_window() -> WindowState {
-        let tid = thread::current().id();
-        debug!("thread ID (init_window) {:#?}", tid);
-        let events_loop = EventsLoop::new();
-
-        let monitor = RustTowerDefenseApplication::get_monitor(&events_loop);
-
-        debug!("Monitor: {:#?}", monitor);
-        let window_builder = WindowBuilder::new()
-            .with_fullscreen(monitor)
-            .with_dimensions(dpi::LogicalSize::new(2880., 1800.))
-            .with_resizable(false)
-            .with_title(WINDOW_NAME.to_string());
-        let window = window_builder.build(&events_loop).unwrap();
-        window.set_maximized(true);
-        window.set_fullscreen(Some(window.get_current_monitor()));
-
-        let window_config = RefCell::new(WindowConfig {
-            is_fullscreen: false,
-            is_maximized: true,
-            decorations: true,
-            #[cfg(target_os = "macos")]
-            macos_use_simple_fullscreen: false,
-        });
-
-        WindowState {
-            events_loop: Some(events_loop),
-            window: window,
-            window_config,
-        }
-    }
+    /// window and graphics state, and then return a new T: <GraphicalGame>.
+    fn init() -> Self;
 
     /// Gets the compiled shader code from the SHADER_DIR
-    pub fn get_shader_code(shader_name: &str) -> Result<ShaderData, Box<dyn Error>> {
+    fn get_shader_code(shader_name: &str) -> Result<ShaderData, Box<dyn Error>> {
         // I will probably want to use some human-readable JSON config for top-level
         // map configurations.
         let shader_path = Path::new(SHADER_DIR).join(shader_name);
@@ -870,662 +1151,11 @@ impl RustTowerDefenseApplication {
         Ok(shader_data)
     }
 
-    // /// Creates the actual graphics pipeline, consisting of programmable (shader) elements as well
-    // /// as fixed functions.
-    // unsafe fn create_graphics_pipeline(
-    //     device: &<back::Backend as Backend>::Device,
-    //     extent: window::Extent2D,
-    //     render_pass: &<back::Backend as Backend>::RenderPass,
-    // ) -> (
-    //     Vec<<back::Backend as Backend>::DescriptorSetLayout>,
-    //     <back::Backend as Backend>::PipelineLayout,
-    //     <back::Backend as Backend>::GraphicsPipeline,
-    // ) {
-    //     let vert_shader_code = RustTowerDefenseApplication::get_shader_code("test.vert.spv")
-    //         .expect("Error loading vertex shader code.");
+    fn do_the_render(&mut self, local_state: &LocalState) -> Result<(), &'static str>;
 
-    //     let frag_shader_code = RustTowerDefenseApplication::get_shader_code("test.frag.spv")
-    //         .expect("Error loading fragment shader code.");
+    fn run(self);
 
-    //     let vert_shader_module = device
-    //         .create_shader_module(&vert_shader_code)
-    //         .expect("Error creating shader module.");
-    //     let frag_shader_module = device
-    //         .create_shader_module(&frag_shader_code)
-    //         .expect("Error creating fragment module.");
-
-    //     let (ds_layouts, pipeline_layout, graphics_pipeline) = {
-    //         let (vs_entry, fs_entry) = (
-    //             pso::EntryPoint::<back::Backend> {
-    //                 entry: "main",
-    //                 module: &vert_shader_module,
-    //                 specialization: hal::pso::Specialization {
-    //                     constants: &[],
-    //                     data: &[],
-    //                 },
-    //             },
-    //             pso::EntryPoint::<back::Backend> {
-    //                 entry: "main",
-    //                 module: &frag_shader_module,
-    //                 specialization: hal::pso::Specialization {
-    //                     constants: &[],
-    //                     data: &[],
-    //                 },
-    //             },
-    //         );
-
-    //         let shaders = pso::GraphicsShaderSet {
-    //             vertex: vs_entry,
-    //             hull: None,
-    //             domain: None,
-    //             geometry: None,
-    //             fragment: Some(fs_entry),
-    //         };
-
-    //         let rasterizer = pso::Rasterizer {
-    //             depth_clamping: false,
-    //             polygon_mode: pso::PolygonMode::Fill,
-    //             cull_face: <pso::Face>::BACK,
-    //             front_face: pso::FrontFace::Clockwise,
-    //             depth_bias: None,
-    //             conservative: false,
-    //         };
-
-    //         // no need to set up vertex input format, as it is hardcoded
-    //         let vertex_buffers: Vec<pso::VertexBufferDesc> = Vec::new();
-    //         let attributes: Vec<pso::AttributeDesc> = Vec::new();
-
-    //         let input_assembler = pso::InputAssemblerDesc::new(Primitive::TriangleList);
-
-    //         // implements optional blending description provided in vulkan-tutorial
-    //         // After a fragment shader has returned a color, it needs to be combined with
-    //         // the color that is already in the framebuffer. This transformation is known as
-    //         // color blending and there are two ways to do it:
-    //         // Mix the old and new value to produce a final color
-    //         // Combine the old and new value using a bitwise operation
-    //         // Not really sure what we do here :)
-    //         // I think it's hardcoded, and this differs from Vulkan to HAL
-    //         let blender = {
-    //             let blend_state = pso::BlendState::On {
-    //                 color: pso::BlendOp::Add {
-    //                     src: pso::Factor::One,
-    //                     dst: pso::Factor::Zero,
-    //                 },
-    //                 alpha: pso::BlendOp::Add {
-    //                     src: pso::Factor::One,
-    //                     dst: pso::Factor::Zero,
-    //                 },
-    //             };
-
-    //             pso::BlendDesc {
-    //                 logic_op: Some(pso::LogicOp::Copy),
-    //                 targets: vec![pso::ColorBlendDesc(pso::ColorMask::ALL, blend_state)],
-    //             }
-    //         };
-
-    //         let depth_stencil = pso::DepthStencilDesc {
-    //             depth: pso::DepthTest::Off,
-    //             depth_bounds: false,
-    //             stencil: pso::StencilTest::Off,
-    //         };
-
-    //         // No multisampling -- it could be used for antialiasing
-    //         let multisampling: Option<pso::Multisampling> = None;
-
-    //         // viewports and scissors
-    //         let baked_states = pso::BakedStates {
-    //             viewport: Some(pso::Viewport {
-    //                 rect: pso::Rect {
-    //                     x: 0,
-    //                     y: 0,
-    //                     w: extent.width as i16,
-    //                     h: extent.height as i16,
-    //                 },
-    //                 depth: (0.0..1.0),
-    //             }),
-    //             scissor: Some(pso::Rect {
-    //                 x: 0,
-    //                 y: 0,
-    //                 w: extent.width as i16,
-    //                 h: extent.height as i16,
-    //             }),
-    //             blend_color: None,
-    //             depth_bounds: None,
-    //         };
-
-    //         // with HAL, user only needs to specify whether overall state is static or dynamic
-
-    //         // pipeline layout
-    //         let bindings = Vec::<pso::DescriptorSetLayoutBinding>::new();
-    //         let immutable_samplers = Vec::<<back::Backend as Backend>::Sampler>::new();
-    //         let ds_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout> = vec![device
-    //             .create_descriptor_set_layout(bindings, immutable_samplers)
-    //             .unwrap()];
-    //         let push_constants = Vec::<(pso::ShaderStageFlags, std::ops::Range<u32>)>::new();
-    //         let layout = device
-    //             .create_pipeline_layout(&ds_layouts, push_constants)
-    //             .unwrap();
-
-    //         let subpass = Subpass {
-    //             index: 0,
-    //             main_pass: render_pass,
-    //         };
-
-    //         let flags = pso::PipelineCreationFlags::empty();
-
-    //         let parent = pso::BasePipeline::None;
-
-    //         let graphics_pipeline = {
-    //             let desc = pso::GraphicsPipelineDesc {
-    //                 shaders,
-    //                 rasterizer,
-    //                 vertex_buffers,
-    //                 attributes,
-    //                 input_assembler,
-    //                 blender,
-    //                 depth_stencil,
-    //                 multisampling,
-    //                 baked_states,
-    //                 layout: &layout,
-    //                 subpass,
-    //                 flags,
-    //                 parent,
-    //             };
-
-    //             device
-    //                 .create_graphics_pipeline(&desc, None)
-    //                 .expect("failed to create graphics pipeline!")
-    //         };
-
-    //         (ds_layouts, layout, graphics_pipeline)
-    //     };
-
-    //     device.destroy_shader_module(vert_shader_module);
-    //     device.destroy_shader_module(frag_shader_module);
-
-    //     (ds_layouts, pipeline_layout, graphics_pipeline)
-    // }
-
-    #[allow(clippy::type_complexity)]
-    fn create_pipeline(
-        device: &mut back::Device,
-        extent: Extent2D,
-        render_pass: &<back::Backend as Backend>::RenderPass,
-    ) -> Result<
-        (
-            Vec<<back::Backend as Backend>::DescriptorSetLayout>,
-            <back::Backend as Backend>::PipelineLayout,
-            <back::Backend as Backend>::GraphicsPipeline,
-        ),
-        &'static str,
-    > {
-        let mut compiler = shaderc::Compiler::new().ok_or("shaderc not found!")?;
-        let vertex_compile_artifact = compiler
-            .compile_into_spirv(
-                VERTEX_SOURCE,
-                shaderc::ShaderKind::Vertex,
-                "vertex.vert",
-                "main",
-                None,
-            )
-            .map_err(|_| "Couldn't compile vertex shader!")?;
-        let fragment_compile_artifact = compiler
-            .compile_into_spirv(
-                FRAGMENT_SOURCE,
-                shaderc::ShaderKind::Fragment,
-                "fragment.frag",
-                "main",
-                None,
-            )
-            .map_err(|e| {
-                error!("{}", e);
-                "Couldn't compile fragment shader!"
-            })?;
-        let vertex_shader_module = unsafe {
-            device
-                .create_shader_module(vertex_compile_artifact.as_binary_u8())
-                .map_err(|_| "Couldn't make the vertex module")?
-        };
-        let fragment_shader_module = unsafe {
-            device
-                .create_shader_module(fragment_compile_artifact.as_binary_u8())
-                .map_err(|_| "Couldn't make the fragment module")?
-        };
-        let (descriptor_set_layouts, pipeline_layout, gfx_pipeline) = {
-            let (vs_entry, fs_entry) = (
-                EntryPoint {
-                    entry: "main",
-                    module: &vertex_shader_module,
-                    specialization: Specialization {
-                        constants: &[],
-                        data: &[],
-                    },
-                },
-                EntryPoint {
-                    entry: "main",
-                    module: &fragment_shader_module,
-                    specialization: Specialization {
-                        constants: &[],
-                        data: &[],
-                    },
-                },
-            );
-            let shaders = GraphicsShaderSet {
-                vertex: vs_entry,
-                hull: None,
-                domain: None,
-                geometry: None,
-                fragment: Some(fs_entry),
-            };
-
-            let input_assembler = InputAssemblerDesc::new(Primitive::TriangleList);
-
-            let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
-                binding: 0,
-                stride: (size_of::<f32>() * 2) as u32,
-                rate: 0,
-            }];
-            let attributes: Vec<AttributeDesc> = vec![AttributeDesc {
-                location: 0,
-                binding: 0,
-                element: Element {
-                    format: Format::Rg32Float,
-                    offset: 0,
-                },
-            }];
-
-            let rasterizer = Rasterizer {
-                depth_clamping: false,
-                polygon_mode: PolygonMode::Fill,
-                cull_face: Face::NONE,
-                front_face: FrontFace::Clockwise,
-                depth_bias: None,
-                conservative: false,
-            };
-
-            let depth_stencil = DepthStencilDesc {
-                depth: DepthTest::Off,
-                depth_bounds: false,
-                stencil: StencilTest::Off,
-            };
-
-            let blender = {
-                let blend_state = BlendState::On {
-                    color: BlendOp::Add {
-                        src: Factor::One,
-                        dst: Factor::Zero,
-                    },
-                    alpha: BlendOp::Add {
-                        src: Factor::One,
-                        dst: Factor::Zero,
-                    },
-                };
-                BlendDesc {
-                    logic_op: Some(LogicOp::Copy),
-                    targets: vec![ColorBlendDesc(ColorMask::ALL, blend_state)],
-                }
-            };
-
-            let baked_states = BakedStates {
-                viewport: Some(Viewport {
-                    rect: extent.to_extent().rect(),
-                    depth: (0.0..1.0),
-                }),
-                scissor: Some(extent.to_extent().rect()),
-                blend_color: None,
-                depth_bounds: None,
-            };
-
-            let bindings = Vec::<DescriptorSetLayoutBinding>::new();
-            let immutable_samplers = Vec::<<back::Backend as Backend>::Sampler>::new();
-            let descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout> =
-                vec![unsafe {
-                    device
-                        .create_descriptor_set_layout(bindings, immutable_samplers)
-                        .map_err(|_| "Couldn't make a DescriptorSetLayout")?
-                }];
-            let push_constants = Vec::<(ShaderStageFlags, core::ops::Range<u32>)>::new();
-            let layout = unsafe {
-                device
-                    .create_pipeline_layout(&descriptor_set_layouts, push_constants)
-                    .map_err(|_| "Couldn't create a pipeline layout")?
-            };
-
-            let gfx_pipeline = {
-                let desc = GraphicsPipelineDesc {
-                    shaders,
-                    rasterizer,
-                    vertex_buffers,
-                    attributes,
-                    input_assembler,
-                    blender,
-                    depth_stencil,
-                    multisampling: None,
-                    baked_states,
-                    layout: &layout,
-                    subpass: Subpass {
-                        index: 0,
-                        main_pass: render_pass,
-                    },
-                    flags: PipelineCreationFlags::empty(),
-                    parent: BasePipeline::None,
-                };
-
-                unsafe {
-                    device
-                        .create_graphics_pipeline(&desc, None)
-                        .map_err(|_| "Couldn't create a graphics pipeline!")?
-                }
-            };
-
-            (descriptor_set_layouts, layout, gfx_pipeline)
-        };
-
-        unsafe {
-            device.destroy_shader_module(vertex_shader_module);
-            device.destroy_shader_module(fragment_shader_module);
-        }
-
-        Ok((descriptor_set_layouts, pipeline_layout, gfx_pipeline))
-    }
-
-    fn do_the_render(&mut self, local_state: &LocalState) -> Result<(), &'static str> {
-        let x = ((local_state.mouse_x / local_state.frame_width) * 2.0) - 1.0;
-        let y = ((local_state.mouse_y / local_state.frame_height) * 2.0) - 1.0;
-        let triangle = Triangle {
-            points: [[-0.5, 0.5], [-0.5, -0.5], [x as f32, y as f32]],
-        };
-        self.hal_state.borrow_mut().draw_triangle_frame(triangle)
-    }
-
-    /// Runs window state's event loop until a CloseRequested event is received
-    /// This should take a event pipe to write keyboard events to that can
-    /// be processed by other systems.
-    fn main_loop(mut self) {
-        let (frame_width, frame_height) = self
-            .window_state
-            .window
-            .get_inner_size()
-            .map(|logical| logical.into())
-            .unwrap_or((0.0, 0.0));
-        let mut local_state = LocalState {
-            frame_width,
-            frame_height,
-            mouse_x: 0.0,
-            mouse_y: 0.0,
-        };
-
-        let mut events_loop = self
-            .window_state
-            .events_loop
-            .take()
-            .expect("events_loop does not exist!");
-
-        loop {
-            let inputs = UserInput::poll_events_loop(&mut events_loop);
-            match inputs {
-                Some(UserInput::EndRequested) => {
-                    break;
-                }
-                Some(UserInput::NewFrameSize(_)) => {
-                    debug!("Window changed size, restarting HalState...");
-                    // XXX This actually isn't a great implementation, we want to keep
-                    // what state we can, but this is easier to implement.
-                    //let hal_state = HalState::new(&self.window_state.window).unwrap();
-                    //drop(self.hal_state);
-                    //mem::replace(&mut self.hal_state, hal_state);
-                    local_state.update_from_input(inputs.unwrap());
-                    let tid = thread::current().id();
-                    debug!("thread ID (events_loop1) {:#?}", tid);
-                    self.hal_state.should_recreate_swapchain = true;
-                    // drop(self.hal_state);
-                    // self.hal_state = HalState::new(&self.window_state.window).unwrap();
-                }
-                Some(r) => {
-                    local_state.update_from_input(r);
-                }
-                None => (),
-            };
-            if let Err(e) = self.do_the_render(&local_state) {
-                error!("Rendering Error: {:?}", e);
-                debug!("Auto-restarting HalState...");
-                // XXX This actually isn't a great implementation, we want to keep
-                // what state we can, but this is easier to implement.
-                // let hal_state = HalState::new(&self.window_state.window).unwrap();
-                // let hal_state = mem::replace(&mut self.hal_state, hal_state);
-                // drop(hal_state);
-                let tid = thread::current().id();
-                debug!("thread ID (events_loop2, err) {:#?}", tid);
-                self.hal_state.should_recreate_swapchain = true;
-                // drop(self.hal_state);
-                // self.hal_state = HalState::new(&self.window_state.window).unwrap();
-            }
-
-            if self.hal_state.should_recreate_swapchain {
-                error!("Have to recreate swapchain...");
-                self.hal_state.device.wait_idle().unwrap();
-
-                let (caps, formats, _present_modes, _) = self
-                    .hal_state
-                    .surface
-                    .compatibility(&mut self.hal_state.adapter.physical_device);
-                // Verify that previous format still exists so we may reuse it.
-                assert!(formats.iter().any(|fs| fs.contains(&self.hal_state.format)));
-
-                // XXX TODO change this hardcoded dimension so we can support resize, see
-                // https://github.com/gfx-rs/gfx/blob/afd03b752ca2a9d24b65de8ef293d58fd52ee4f2/examples/quad/main.rs
-                // let swapchain_config = SwapchainConfig {
-                //     present_mode,
-                //     composite_alpha,
-                //     format,
-                //     extent,
-                //     image_count,
-                //     image_layers,
-                //     image_usage,
-                // };
-                let extent = {
-                    Extent2D {
-                        width: 2880,
-                        height: 1800,
-                    }
-                };
-                let swap_config = SwapchainConfig::from_caps(&caps, self.hal_state.format, extent);
-                println!("{:?}", swap_config);
-                let extent = swap_config.extent.to_extent();
-
-                let (new_swap_chain, new_backbuffer) = unsafe {
-                    self.hal_state.device.create_swapchain(
-                        &mut self.hal_state.surface,
-                        swap_config,
-                        None,
-                        // XXX TODO not sure what this implies, auto-drop?
-                        //Some(self.hal_state.swapchain),
-                    )
-                }
-                .expect("Can't create swapchain");
-
-                unsafe {
-                    // Clean up the old framebuffers, images and swapchain
-                    &self.hal_state.cleanup_framebuffers();
-                }
-
-                // XXX TODO IDK??? do i need to drop this? it's manuallydrop
-                //drop(self.hal_state.swapchain);
-                self.hal_state.swapchain = ManuallyDrop::new(new_swap_chain);
-
-                let (new_frame_images, new_framebuffers) = match new_backbuffer {
-                    Backbuffer::Images(images) => {
-                        let imageviews = images
-                            .into_iter()
-                            .map(|image| unsafe {
-                                let rtv = self
-                                    .hal_state
-                                    .device
-                                    .create_image_view(
-                                        &image,
-                                        ViewKind::D2,
-                                        self.hal_state.format,
-                                        Swizzle::NO,
-                                        SubresourceRange {
-                                            aspects: Aspects::COLOR,
-                                            levels: 0..1,
-                                            layers: 0..1,
-                                        },
-                                    )
-                                    .unwrap();
-                                rtv
-                            })
-                            .collect::<Vec<_>>();
-                        let fbos = imageviews
-                            .iter()
-                            .map(|&ref rtv| unsafe {
-                                self.hal_state
-                                    .device
-                                    .create_framebuffer(
-                                        &self.hal_state.render_pass,
-                                        Some(rtv),
-                                        extent,
-                                    )
-                                    .unwrap()
-                            })
-                            .collect();
-                        (imageviews, fbos)
-                    }
-                    Backbuffer::Framebuffer(fbo) => (Vec::new(), vec![fbo]),
-                };
-
-                self.hal_state.framebuffers = new_framebuffers;
-                self.hal_state.image_views = new_frame_images;
-                // XXX TODO for resize vvv
-                // self.hal_state.viewport.rect.w = extent.width as _;
-                // self.hal_state.viewport.rect.h = extent.height as _;
-                self.hal_state.should_recreate_swapchain = false;
-            }
-        }
-    }
-    //     events_loop.run_forever(|event| match event {
-    //         Event::WindowEvent {
-    //             event: WindowEvent::CloseRequested,
-    //             ..
-    //         } => {
-    //             self.hal_state
-    //                 .device
-    //                 .wait_idle()
-    //                 .expect("Queues are not going idle!");
-    //             ControlFlow::Break
-    //         }
-    //         _ => {
-    //             unsafe {
-    //                 RustTowerDefenseApplication::draw_frame(
-    //                     &self.hal_state.device,
-    //                     &mut self.hal_state.command_queues,
-    //                     &mut self.hal_state.swapchain,
-    //                     &self.hal_state.command_buffers,
-    //                     &self.hal_state.image_available_semaphores[current_frame],
-    //                     &self.hal_state.render_finished_semaphores[current_frame],
-    //                     &self.hal_state.in_flight_fences[current_frame],
-    //                 );
-    //             }
-
-    //             current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
-    //             ;
-    //             ControlFlow::Continue
-    //         }
-    //     });
-    //     self.window_state.events_loop = Some(events_loop);
-    // }
-    // fn main_loop(&mut self) {
-    //     info!("Starting event loop...");
-    //     let mut current_frame: usize = 0;
-
-    //     let mut window_config = self.window_state.window_config.borrow_mut();
-    //     self.window_state
-    //         .events_loop.borrow_mut()
-    //         .run_forever(|event| {
-    //             println!("{:?}", event);
-
-    //             match event {
-    //                 Event::WindowEvent { event, .. } => match event {
-    //                     WindowEvent::CloseRequested => {
-    //                         // self.hal_state
-    //                         //     .device
-    //                         //     .wait_idle()
-    //                         //     .expect("Queues are not going idle!");
-    //                         return ControlFlow::Break;
-    //                     },
-    //                     WindowEvent::KeyboardInput {
-    //                         input:
-    //                             winit::KeyboardInput {
-    //                                 virtual_keycode: Some(virtual_code),
-    //                                 state,
-    //                                 ..
-    //                             },
-    //                         ..
-    //                     } => match (virtual_code, state) {
-    //                         (winit::VirtualKeyCode::Escape, _) => {
-    //                             // self.hal_state
-    //                             //     .device
-    //                             //     .wait_idle()
-    //                             //     .expect("Queues are not going idle!");
-
-    //                             return ControlFlow::Break;
-    //                         },
-    //                         (winit::VirtualKeyCode::F, winit::ElementState::Pressed) => {
-    //                             #[cfg(target_os = "macos")]
-    //                             {
-    //                                 if window_config.macos_use_simple_fullscreen {
-    //                                     use winit::os::macos::WindowExt;
-    //                                     if WindowExt::set_simple_fullscreen(&self.window_state.window, !window_config.is_fullscreen) {
-    //                                         window_config.is_fullscreen = !window_config.is_fullscreen;
-    //                                     }
-
-    //                                     return ControlFlow::Continue;
-    //                                 }
-    //                             }
-
-    //                             window_config.is_fullscreen = !window_config.is_fullscreen;
-    //                             if !window_config.is_fullscreen {
-    //                                 self.window_state.window.set_fullscreen(None);
-    //                             } else {
-    //                                 self.window_state.window.set_fullscreen(Some(self.window_state.window.get_current_monitor()));
-    //                             }
-    //                         }
-    //                         (winit::VirtualKeyCode::M, winit::ElementState::Pressed) => {
-    //                             window_config.is_maximized = !window_config.is_maximized;
-    //                             self.window_state.window.set_maximized(window_config.is_maximized);
-    //                         }
-    //                         (winit::VirtualKeyCode::D, winit::ElementState::Pressed) => {
-    //                             window_config.decorations = !window_config.decorations;
-    //                             self.window_state.window.set_decorations(window_config.decorations);
-    //                         }
-    //                         _ => (),
-    //                     },
-    //                     _ => (),
-    //                 },
-    //                 _ => {}
-    //             }
-
-    //             unsafe {
-    //                 RustTowerDefenseApplication::draw_frame(
-    //                     &self.hal_state.device,
-    //                     &mut self.hal_state.command_queues,
-    //                     &mut self.hal_state.swapchain,
-    //                     &self.hal_state.command_buffers,
-    //                     &self.hal_state.image_available_semaphores[current_frame],
-    //                     &self.hal_state.render_finished_semaphores[current_frame],
-    //                     &self.hal_state.in_flight_fences[current_frame],
-    //                 );
-    //             }
-
-    //             current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
-    //             ;
-    //             ControlFlow::Continue
-    //         });
-    // }
-
-    /// Runs the application's main loop function.
-    fn run(mut self) {
-        info!("Running application...");
-        self.main_loop();
-    }
+    fn main_loop(self);
 }
+
+type ShaderData = Vec<u8>;
