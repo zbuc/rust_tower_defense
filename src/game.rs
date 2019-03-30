@@ -7,16 +7,10 @@ use std::fs::File;
 use std::io::Read;
 use std::io::Write;
 use std::rc::Rc;
-use std::thread;
 
 use super::geometry::Point;
-use super::graphics::{
-    GraphicalGame, GraphicsState, HalState, LocalState, Triangle, UserInput, WindowState,
-};
+use super::graphics::{GraphicalGame, GraphicsState, LocalState, Triangle, UserInput};
 use crate::bincode::{deserialize, serialize};
-use crate::hal::format::{Aspects, Swizzle};
-use crate::hal::window::{Backbuffer, Extent2D};
-use core::mem::ManuallyDrop;
 use entities::GameEntity;
 use map::{GameMap, DEFAULT_MAP, DEFAULT_MAP_DIMENSIONS, DEFAULT_MAP_NAME};
 
@@ -182,7 +176,7 @@ pub fn run() {
         Err(e) => panic!("Can't open default map: {}", e),
     };
 
-    let game = start_game(map);
+    let _game = start_game(map);
     let application = RustTowerDefenseApplication::init();
     application.run();
 }

@@ -303,7 +303,7 @@ impl GraphicsState {
         }
     }
 
-    pub fn restart_halstate(&mut self, local_state: LocalState) {
+    pub fn restart_halstate(&mut self, _local_state: LocalState) {
         // XXX This actually isn't a great implementation, we want to keep
         // what state we can, but this is easier to implement.
         //let hal_state = HalState::new(&self.window_state.window).unwrap();
@@ -1008,7 +1008,11 @@ impl HalState {
         };
         let the_command_queue = &mut self.queue_group.queues[0];
         unsafe {
+            // The list of work in the CommandBuffer is sent to the GPU and processed.
             the_command_queue.submit(submission, Some(flight_fence));
+
+            // This is where something actually gets drawn! The swapchain waits for the
+            // work submitted to the GPU to finish processing, and then displays the results.
             self.swapchain
                 .present(the_command_queue, i_u32, present_wait_semaphores)
                 .map_err(|e| {
@@ -1151,7 +1155,7 @@ pub trait GraphicalGame {
 
     fn run(self);
 
-    fn main_loop(mut self);
+    fn main_loop(self);
 }
 
 type ShaderData = Vec<u8>;
