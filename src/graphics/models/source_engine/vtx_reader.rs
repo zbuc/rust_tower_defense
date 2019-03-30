@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::fs::{File};
 use std::io::Read;
+use std::mem;
 
 // https://developer.valvesoftware.com/wiki/Model
 
@@ -58,8 +59,17 @@ pub struct VTXFileHeader
 }
 
 #[derive(Copy, Clone)]
+pub struct VTXFileBodyPartHeader
+{
+	//Model array
+	num_models: i32,
+	model_offset: i32,
+}
+
+#[derive(Clone)]
 pub struct VTXFile {
     pub header: VTXFileHeader,
+    pub bodyparts: Vec<VTXFileBodyPartHeader>,
 }
 
 /// Loads a Source Engine vtx file from disk and returns it parsed to an instance of the VTXFile struct.
@@ -80,18 +90,25 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
         Err(_e) => return Err(VTXDeserializeError::new("Error reading vtx file contents")),
     };
 
-    let data_ptr: *const u8 = vtx_data_bytes.as_ptr();
-    let header_ptr: *const VTXFileHeader = data_ptr as *const _;
+    let header_data_ptr: *const u8 = vtx_data_bytes[0..mem::size_of::<VTXFileHeader>()].as_ptr();
+    let header_ptr: *const VTXFileHeader = header_data_ptr as *const _;
     let header: &VTXFileHeader = unsafe { &*header_ptr };
 
-    // if header.id != MDL_HEADER {
-    //     return Err(MDLDeserializeError::new("Model header not correct; expected [0x49, 0x44, 0x53, 0x54]"));
-    // }
+    let bodyparts_data_ptr: *const u8 = vtx_data_bytes[36..36 + mem::size_of::<VTXFileBodyPartHeader>()].as_ptr();
+    let bodyparts_ptr: *const VTXFileBodyPartHeader = bodyparts_data_ptr as *const _;
+    let bodyparts: &VTXFileBodyPartHeader = unsafe { &*bodyparts_ptr };
+
+
+    // The first 4 bytes of a VTX file should be a version, 7 (OPTIMIZED_MODEL_FILE_VERSION)
+    if header.version != OPTIMIZED_MODEL_FILE_VERSION {
+        return Err(VTXDeserializeError::new("VTX version not correct; expected 7"));
+    }
 
     // XXX there *really* should be actual checked deserialization here because this will produce unexpected behavior
     // for improperly formatted models -- but I'm *personally* only ever going to feed it good models ;)
 
     Ok(VTXFile{
         header: *header,
+        bodyparts: vec![*bodyparts],
     })
 }
