@@ -300,7 +300,7 @@ pub const INDICES: [u16; 642] = [
 ];
 
 pub fn run() {
-    let model = mdl_reader::read_model_file_from_disk("source_assets/models/ctm_sas_varianta.mdl").unwrap();
+    let model = mdl_reader::read_mdl_file_from_disk("source_assets/models/ctm_sas_varianta.mdl").unwrap();
     info!("Model id {}", model.header.id);
 
     let extensions = vulkano_win::required_extensions();

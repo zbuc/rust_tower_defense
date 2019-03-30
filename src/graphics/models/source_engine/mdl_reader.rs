@@ -228,24 +228,24 @@ pub struct MDLFile {
     pub header: MDLFileHeader,
 }
 
-/// Loads a Source Engine model file from disk and returns it parsed to an instance of the MDLFile struct.
+/// Loads a Source Engine mdl file from disk and returns it parsed to an instance of the MDLFile struct.
 /// I pieced this together from publicly available documentation, e.g. https://developer.valvesoftware.com/wiki/MDL
 /// and reverse engineering the mdllib.dll included with Source SDK 2013 and used in the example hlmv.exe model viewer.
 ///
 /// # Errors
 ///
-/// If there is any issue loading the model file from disk, an Err variant will
+/// If there is any issue loading the mdl file from disk, an Err variant will
 /// be returned.
-pub fn read_model_file_from_disk(path: &str) -> Result<MDLFile, MDLDeserializeError> {
+pub fn read_mdl_file_from_disk(path: &str) -> Result<MDLFile, MDLDeserializeError> {
     let mut model_file = match File::open(path) {
         Ok(f) => f,
-        Err(_e) => return Err(MDLDeserializeError::new("Unable to open model file from disk")),
+        Err(_e) => return Err(MDLDeserializeError::new("Unable to open mdl file from disk")),
     };
 
     let mut model_data_bytes = Vec::<u8>::new();
     match model_file.read_to_end(&mut model_data_bytes) {
         Ok(b) => b,
-        Err(_e) => return Err(MDLDeserializeError::new("Error reading model file contents")),
+        Err(_e) => return Err(MDLDeserializeError::new("Error reading mdl file contents")),
     };
 
     let data_ptr: *const u8 = model_data_bytes.as_ptr();
@@ -253,7 +253,7 @@ pub fn read_model_file_from_disk(path: &str) -> Result<MDLFile, MDLDeserializeEr
     let header: &MDLFileHeader = unsafe { &*header_ptr };
 
     if header.id != MDL_HEADER {
-        return Err(MDLDeserializeError::new("Model header not correct; expected [0x49, 0x44, 0x53, 0x54]"));
+        return Err(MDLDeserializeError::new("mdl header not correct; expected [0x49, 0x44, 0x53, 0x54]"));
     }
 
     // XXX there *really* should be actual checked deserialization here because this will produce unexpected behavior
