@@ -2,7 +2,6 @@ use std::error::Error;
 use std::fmt;
 use std::fs::{File};
 use std::io::Read;
-use std::mem;
 
 #[derive(Debug)]
 pub struct MDLDeserializeError {
@@ -27,6 +26,11 @@ impl Error for MDLDeserializeError {
     }
 }
 
+// >>> import struct
+// >>> struct.unpack("<i", "\x49\x44\x53\x54")
+// (1414743113,)
+const MDL_HEADER: i32 = 1414743113;
+
 #[repr(C)]
 struct MDLVector(f32, f32, f32);
 
@@ -38,7 +42,7 @@ pub struct MDLFile {
 	checksum: i32,	// This has to be the same in the phy and vtx files to load!
 	name: [char; 64],		// The internal name of the model, padding with null bytes.
 					// Typically "my_model.mdl" will have an internal name of "my_model"
-	dataLength: i32,	// Data size of MDL file in bytes.
+	data_length: i32,	// Data size of MDL file in bytes.
  
 	// A vector is 12 bytes, three 4-byte float-values in a row.
 	eyeposition: MDLVector,	// Position of player viewpoint relative to model origin
@@ -171,14 +175,14 @@ pub struct MDLFile {
 	includemodel_count: i32,
 	includemodel_index: i32,
 	
-	virtualModel: i32,	// Placeholder for mutable-void*
+	virtual_model: i32,	// Placeholder for mutable-void*
  
 	// mstudioanimblock_t
 	animblocks_name_index: i32,
 	animblocks_count: i32,
 	animblocks_index: i32,
 	
-	animblockModel: i32, // Placeholder for mutable-void*
+	animblock_model: i32, // Placeholder for mutable-void*
 
 	// Points to a series of bytes?
 	bonetablename_index: i32,
@@ -190,10 +194,10 @@ pub struct MDLFile {
 	// Model should have flag #13 set if enabled
 	directionaldotproduct: u8,
 	
-	rootLod: u8,	// Preferred rather than clamped
+	root_lod: u8,	// Preferred rather than clamped
 	
 	// 0 means any allowed, N means Lod 0 -> (N-1)
-	numAllowedRootLods: u8,
+	num_allowed_root_lods: u8,
 	
 	unused1: u8, // ??
 	unused2: i32, // ??
@@ -226,27 +230,25 @@ pub struct MDLFile {
 pub fn read_model_file_from_disk(path: &str) -> Result<&MDLFile, MDLDeserializeError> {
     let mut model_file = match File::open(path) {
         Ok(f) => f,
-        Err(e) => return Err(MDLDeserializeError::new("Unable to open model file from disk")),
+        Err(_e) => return Err(MDLDeserializeError::new("Unable to open model file from disk")),
     };
 
     let mut model_data_bytes = Vec::<u8>::new();
     match model_file.read_to_end(&mut model_data_bytes) {
         Ok(b) => b,
-        Err(e) => return Err(MDLDeserializeError::new("Error reading model file contents")),
+        Err(_e) => return Err(MDLDeserializeError::new("Error reading model file contents")),
     };
 
     let data_ptr: *const u8 = model_data_bytes.as_ptr();
     let header_ptr: *const MDLFile = data_ptr as *const _;
     let header_ref: &MDLFile = unsafe { &*header_ptr };
 
-    let mdl_header: [u8; 4] = [0x49, 0x44, 0x53, 0x54];
-    let mdl_header_i32: i32 = unsafe {
-         mem::transmute::<[u8; 4], i32>(mdl_header)
-    };
-
-    if header_ref.id != mdl_header_i32 {
+    if header_ref.id != MDL_HEADER {
         return Err(MDLDeserializeError::new("Model header not correct; expected [0x49, 0x44, 0x53, 0x54]"));
     }
+
+    // XXX there *really* should be actual checked deserialization here because this will produce unexpected behavior
+    // for improperly formatted models -- but I'm *personally* only ever going to feed it good models ;)
 
     Ok(header_ref)
 }

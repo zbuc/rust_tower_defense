@@ -2,7 +2,7 @@ use crate::serde_derive::{Deserialize, Serialize};
 
 #[cfg(test)]
 mod tests {
-    use crate::geometry::{BoundingBox, Point, Polygon};
+    use crate::geometry::{Point};
 
     #[test]
     fn point_tests() {
