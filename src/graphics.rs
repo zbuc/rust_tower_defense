@@ -1,3 +1,4 @@
+pub mod mdl_reader;
 
 extern crate winit;
 extern crate cgmath;
