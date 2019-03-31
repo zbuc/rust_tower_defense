@@ -71,8 +71,8 @@ pub struct VTXFileBodyPartHeader
 pub struct VTXFileModelHeader
 {
 	// LOD mesh array
-	pub num_lods: i32,   //T his is also specified in FileHeader_t
-	pub lodOffset: i32,
+	pub num_lods: i32,   // This is also specified in FileHeader_t
+	pub lod_offset: i32,
 }
 
 #[derive(Clone)]
