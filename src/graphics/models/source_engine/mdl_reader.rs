@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::fs::{File};
 use std::io::Read;
+use std::ffi::{CString, CStr};
 
 // https://developer.valvesoftware.com/wiki/Model
 
@@ -44,7 +45,7 @@ pub struct MDLFileHeader {
     pub id: i32,		// Model format ID, such as "IDST" (0x49 0x44 0x53 0x54)
 	version: i32,	// Format version number, such as 48 (0x30,0x00,0x00,0x00)
 	checksum: i32,	// This has to be the same in the phy and vtx files to load!
-	name: [char; 64],		// The internal name of the model, padding with null bytes.
+	pub name: [u8; 64],		// The internal name of the model, padding with null bytes.
 					// Typically "my_model.mdl" will have an internal name of "my_model"
 	data_length: i32,	// Data size of MDL file in bytes.
  
@@ -220,12 +221,14 @@ pub struct MDLFileHeader {
 
 	unused3: i32, // ??
 	
-	// As of this writing, the header is 408 bytes long in total
+	// As of this writing, the header is 408 bytes long in total -- OR THAT'S WHAT VALVE SAYS.
+	// I tried using the header directly from C and received 400 bytes.
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct MDLFile {
     pub header: MDLFileHeader,
+	pub name: String,
 }
 
 /// Loads a Source Engine mdl file from disk and returns it parsed to an instance of the MDLFile struct.
@@ -256,6 +259,15 @@ pub fn read_mdl_file_from_disk(path: &str) -> Result<MDLFile, MDLDeserializeErro
         return Err(MDLDeserializeError::new("mdl header not correct; expected [0x49, 0x44, 0x53, 0x54]"));
     }
 
+	// from_bytes_with_nul requires no internal NUL chars, so we need to find
+	// the first index of a NUL char in the string
+	let first_null = &header.name.iter().position(|&r| r == 0x0).unwrap() + 1;
+	let name = CStr::from_bytes_with_nul(&header.name[0..first_null]).expect("CStr::from_bytes_with_nul failed");
+	let name = match name.to_str() {
+		Ok(s) => s,
+		Err(_e) => return Err(MDLDeserializeError::new("Error converting name to string")),
+	};
+
     // XXX there *really* should be actual checked deserialization here because this will produce unexpected behavior
     // for improperly formatted models -- but I'm *personally* only ever going to feed it good models ;)
 
@@ -271,5 +283,6 @@ pub fn read_mdl_file_from_disk(path: &str) -> Result<MDLFile, MDLDeserializeErro
 
     Ok(MDLFile{
         header: *header,
+		name: String::from(name),
     })
 }
