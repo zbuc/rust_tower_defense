@@ -13,10 +13,13 @@ pub const MODEL_PATH: &str = "source_assets/models/";
 ///
 /// Might want to remove the references to the files here and make more
 /// properties.
+#[derive(Clone)]
 pub struct SourceEngineModel {
     pub mdl_file: mdl_reader::MDLFile,
     pub vtx_file: vtx_reader::VTXFile,
     pub vvd_file: vvd_reader::VVDFile,
+    pub vertices: Vec<super::super::Vertex>,
+    pub normals: Vec<super::super::Vertex>,
 }
 
 #[repr(C)]
@@ -70,9 +73,25 @@ pub fn read_source_engine_model(name: &str) -> Result<SourceEngineModel, Box<dyn
         return Err(Box::new(ModelLoadError::new("Model checksum mismatch")));
     }
 
+    let mut vertices: Vec<super::super::Vertex> = Vec::new();
+    for vertex in vvd_file.vertices.iter() {
+        vertices.push(super::super::Vertex {
+            position: (vertex.vec_position.0, vertex.vec_position.1, vertex.vec_position.2),
+        });
+    }
+
+    let mut normals: Vec<super::super::Vertex> = Vec::new();
+    for vertex in vvd_file.vertices.iter() {
+        normals.push(super::super::Vertex {
+            position: (vertex.vec_normal.0, vertex.vec_normal.1, vertex.vec_normal.2),
+        });
+    }
+
     Ok(SourceEngineModel {
         mdl_file,
         vtx_file,
         vvd_file,
+        vertices,
+        normals,
     })
 }

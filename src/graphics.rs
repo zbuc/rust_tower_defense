@@ -35,7 +35,7 @@ use std::iter;
 use std::sync::Arc;
 use std::time::Instant;
 
-use models::source_engine::mdl_reader;
+use models::source_engine;
 
 #[derive(Copy, Clone)]
 pub struct Vertex {
@@ -158,8 +158,11 @@ pub const INDICES: [u16; 642] = [
 
 pub fn run() {
     let model =
-        mdl_reader::read_mdl_file_from_disk("source_assets/models/ctm_sas_varianta.mdl").unwrap();
-    info!("Model id {}", model.header.id);
+        source_engine::read_source_engine_model("player/ctm_sas_variantA").unwrap();
+    info!("Model id {}", model.mdl_file.header.id);
+
+    let vertices: Vec<Vertex> = model.vertices;
+    let normals: Vec<Vertex> = model.normals;
 
     let extensions = vulkano_win::required_extensions();
     let instance = Instance::new(None, &extensions, None).unwrap();
@@ -230,11 +233,13 @@ pub fn run() {
         .unwrap()
     };
 
-    let vertices = VERTICES.iter().cloned();
+    // let vertices = VERTICES.iter().cloned();
+    let vertices = vertices.iter().cloned();
     let vertex_buffer =
         CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), vertices).unwrap();
 
-    let normals = NORMALS.iter().cloned();
+    // let normals = NORMALS.iter().cloned();
+    let normals = normals.iter().cloned();
     let normals_buffer =
         CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), normals).unwrap();
 
@@ -355,6 +360,7 @@ pub fn run() {
                 Err(err) => panic!("{:?}", err),
             };
 
+
         let command_buffer =
             AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
                 .unwrap()
@@ -364,11 +370,10 @@ pub fn run() {
                     vec![[0.0, 0.0, 1.0, 1.0].into(), 1f32.into()],
                 )
                 .unwrap()
-                .draw_indexed(
+                .draw(
                     pipeline.clone(),
                     &DynamicState::none(),
                     vec![vertex_buffer.clone(), normals_buffer.clone()],
-                    index_buffer.clone(),
                     set.clone(),
                     (),
                 )
@@ -377,6 +382,28 @@ pub fn run() {
                 .unwrap()
                 .build()
                 .unwrap();
+        // let command_buffer =
+        //     AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
+        //         .unwrap()
+        //         .begin_render_pass(
+        //             framebuffers[image_num].clone(),
+        //             false,
+        //             vec![[0.0, 0.0, 1.0, 1.0].into(), 1f32.into()],
+        //         )
+        //         .unwrap()
+        //         .draw_indexed(
+        //             pipeline.clone(),
+        //             &DynamicState::none(),
+        //             vec![vertex_buffer.clone(), normals_buffer.clone()],
+        //             index_buffer.clone(),
+        //             set.clone(),
+        //             (),
+        //         )
+        //         .unwrap()
+        //         .end_render_pass()
+        //         .unwrap()
+        //         .build()
+        //         .unwrap();
 
         let future = previous_frame
             .join(acquire_future)

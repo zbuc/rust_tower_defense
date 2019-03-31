@@ -64,10 +64,10 @@ pub struct VVDFileFixupTable {
 // NOTE: This is exactly 48 bytes
 #[derive(Copy, Clone)]
 pub struct VVDFileVertex {
-    bone_weight: VVDFileBoneWeight,
-    vec_position: super::SourceModelVector,
-    vec_normal: super::SourceModelVector,
-    vec_tex_coord: super::SourceModelVector2D,
+    pub bone_weight: VVDFileBoneWeight,
+    pub vec_position: super::SourceModelVector,
+    pub vec_normal: super::SourceModelVector,
+    pub vec_tex_coord: super::SourceModelVector2D,
 }
 
 // Bone weighting (0-12) [3xfloat] - Contains a maximum of 3 floating points numbers, one for each bone. The engine allows a maximum of 3 bones per vert. Older formats such as version 37 used 4 bones.
