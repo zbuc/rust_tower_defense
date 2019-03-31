@@ -46,7 +46,7 @@ pub struct VTXFileHeader
 	max_bones_per_vert: i32,
 
 	// must match checkSum in the .mdl
-	checksum: i32,
+	pub checksum: i32,
 
 	num_lods: i32, // Also specified in ModelHeader_t's and should match
 
