@@ -19,6 +19,14 @@ pub struct SourceEngineModel {
     pub vvd_file: vvd_reader::VVDFile,
 }
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct SourceModelVector(f32, f32, f32);
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct SourceModelVector2D(f32, f32);
+
 #[derive(Debug)]
 pub struct ModelLoadError {
     details: String,

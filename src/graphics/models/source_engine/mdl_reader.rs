@@ -36,10 +36,6 @@ impl Error for MDLDeserializeError {
 // (1414743113,)
 const MDL_HEADER: i32 = 1414743113;
 
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct MDLVector(f32, f32, f32);
-
 /// https://developer.valvesoftware.com/wiki/MDL
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -52,12 +48,12 @@ pub struct MDLFileHeader {
     pub data_length: i32, // Data size of MDL file in bytes.
 
     // A vector is 12 bytes, three 4-byte float-values in a row.
-    pub eye_position: MDLVector, // Position of player viewpoint relative to model origin
-    llum_position: MDLVector, // ?? Presumably the point used for lighting when per-vertex lighting is not enabled.
-    ull_min: MDLVector,       // Corner of model hull box with the least X/Y/Z values
-    ull_max: MDLVector,       // Opposite corner of model hull box
-    view_bbmin: MDLVector,
-    view_bbmax: MDLVector,
+    pub eye_position: super::SourceModelVector, // Position of player viewpoint relative to model origin
+    llum_position: super::SourceModelVector, // ?? Presumably the point used for lighting when per-vertex lighting is not enabled.
+    ull_min: super::SourceModelVector,       // Corner of model hull box with the least X/Y/Z values
+    ull_max: super::SourceModelVector,       // Opposite corner of model hull box
+    view_bbmin: super::SourceModelVector,
+    view_bbmax: super::SourceModelVector,
 
     pub flags: i32, // Binary flags in little-endian order.
     // ex (00000001,00000000,00000000,11000000) means flags for position 0, 30, and 31 are set.

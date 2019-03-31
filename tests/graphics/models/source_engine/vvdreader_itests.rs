@@ -21,7 +21,18 @@ fn load_vvd() {
         vvdfile.header.fixup_table_start
     );
 
-    assert_eq!(vvdfile.fixup_table.num_vertexes, 0);
+    assert_eq!(mem::size_of::<vvd_reader::VVDFileFixupTable>() as i32, 12);
+
+    assert!(vvdfile.fixup_table.is_none());
+
+    assert_eq!(vvdfile.header.vertex_data_start, 64);
+    assert_eq!(vvdfile.header.num_lods, 1);
+    assert_eq!(vvdfile.header.num_lod_vertexes.len(), 8);
+    assert_eq!(vvdfile.header.num_fixups, 0);
+
+    assert_eq!(vvdfile.header.tangent_data_start, 537856);
+
+    assert_eq!(vvdfile.vertices.len(), 11205);
 }
 
 #[test]

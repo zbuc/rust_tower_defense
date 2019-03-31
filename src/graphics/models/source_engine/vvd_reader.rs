@@ -61,10 +61,37 @@ pub struct VVDFileFixupTable {
     pub num_vertexes: i32,
 }
 
+// NOTE: This is exactly 48 bytes
 #[derive(Copy, Clone)]
+pub struct VVDFileVertex {
+    bone_weight: VVDFileBoneWeight,
+    vec_position: super::SourceModelVector,
+    vec_normal: super::SourceModelVector,
+    vec_tex_coord: super::SourceModelVector2D,
+}
+
+// Bone weighting (0-12) [3xfloat] - Contains a maximum of 3 floating points numbers, one for each bone. The engine allows a maximum of 3 bones per vert. Older formats such as version 37 used 4 bones.
+// Bone IDs (12-15) [3xbyte] - IDs of the bones the vertex is weighted to. The first bone will use the first float number for weighting.
+// Bone count (15-16) [byte] - Number of bones the vertex is weighted to. This should be at least 1.
+// Position (16-28) [3xfloat] - Floating points numbers for each axis (XYZ) in inches.
+// Normals (28-40) [3xfloat] - Floating points numbers for vertex normals.
+// Texture Co-ordinates (40-48) [2xfloat] - Floating points numbers for UV map. The value for V may need to inverted and incremented by 1 to get back the original value.
+
+const MAX_NUM_BONES_PER_VERT: usize = 3;
+
+// 16 bytes
+#[derive(Copy, Clone)]
+pub struct VVDFileBoneWeight {
+    weight: [f32; MAX_NUM_BONES_PER_VERT],
+    bone: [u8; MAX_NUM_BONES_PER_VERT],
+    num_bones: u8,
+}
+
+#[derive(Clone)]
 pub struct VVDFile {
     pub header: VVDFileHeader,
-    pub fixup_table: VVDFileFixupTable,
+    pub fixup_table: Option<VVDFileFixupTable>,
+    pub vertices: Vec<VVDFileVertex>,
 }
 
 pub fn read_vvd_file_by_name(name: &str) -> Result<VVDFile, VVDDeserializeError> {
@@ -114,22 +141,48 @@ pub fn read_vvd_file_from_disk(path: &str) -> Result<VVDFile, VVDDeserializeErro
         ));
     }
 
-    let fixup_start_index: usize = header.fixup_table_start as usize;
-    let fixup_end_index: usize =
-        header.fixup_table_start as usize + mem::size_of::<VVDFileFixupTable>();
+    if header.num_fixups > 0 {
+        info!("loading fixups -- not working yet");
+        let fixup_start_index: usize = header.fixup_table_start as usize;
+        let fixup_end_index: usize =
+            header.fixup_table_start as usize + mem::size_of::<VVDFileFixupTable>();
 
-    let fixup_data_ptr: *const u8 = vvd_data_bytes[fixup_start_index..fixup_end_index].as_ptr();
-    let fixup_ptr: *const VVDFileFixupTable = fixup_data_ptr as *const _;
-    let fixup_table: &VVDFileFixupTable = unsafe { &*fixup_ptr };
+        let fixup_data_ptr: *const u8 = vvd_data_bytes[fixup_start_index..fixup_end_index].as_ptr();
+        let fixup_ptr: *const VVDFileFixupTable = fixup_data_ptr as *const _;
+        let fixup_table: &VVDFileFixupTable = unsafe { &*fixup_ptr };
 
-    // How the fixup table is used when loading vertex data:
+        assert!(fixup_end_index <= header.vertex_data_start as usize);
 
-    // If there's no fixup table (numFixups is 0) then all the vertices are loaded
-    // If there is, then the engine iterates through all the fixups. If the LOD of a fixup is superior or equal to the required LOD, it loads the vertices associated with that fixup (see sourceVertexID and numVertices).
-    // A fixup seems to be generated for instance if a vertex has a different position from a parent LOD.
+        // How the fixup table is used when loading vertex data:
+
+        // If there's no fixup table (numFixups is 0) then all the vertices are loaded
+        // If there is, then the engine iterates through all the fixups. If the LOD of a fixup is superior or equal to the required LOD, it loads the vertices associated with that fixup (see sourceVertexID and numVertices).
+        // A fixup seems to be generated for instance if a vertex has a different position from a parent LOD.
+    }
+
+    // A list of vertices follows the header
+    let mut vertices: Vec<VVDFileVertex> = Vec::new();
+
+    let mut vertex_start_index = header.vertex_data_start as usize;
+    let mut vertex_end_index = vertex_start_index + mem::size_of::<VVDFileVertex>();
+    let mut i = 0 as usize;
+    while vertex_start_index <= header.tangent_data_start as usize {
+        let vertex_data_ptr: *const u8 =
+            vvd_data_bytes[vertex_start_index..vertex_end_index].as_ptr();
+        let vertex_ptr: *const VVDFileVertex = vertex_data_ptr as *const _;
+        let vertex: &VVDFileVertex = unsafe { &*vertex_ptr };
+
+        vertices.push(*vertex);
+
+        i = i + 1;
+        vertex_start_index =
+            header.vertex_data_start as usize + mem::size_of::<VVDFileVertex>() * i;
+        vertex_end_index = vertex_start_index + mem::size_of::<VVDFileVertex>();
+    }
 
     Ok(VVDFile {
         header: *header,
-        fixup_table: *fixup_table,
+        fixup_table: None,
+        vertices: vertices,
     })
 }
