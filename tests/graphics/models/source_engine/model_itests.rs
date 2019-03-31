@@ -10,8 +10,14 @@ fn load_model() {
 
     assert_eq!(model.mdl_file.name, "player/ctm_sas_variantA.mdl");
 
-    assert_eq!(model.mdl_file.header.checksum, model.vvd_file.header.checksum);
-    assert_eq!(model.vvd_file.header.checksum, model.vtx_file.header.checksum);
+    assert_eq!(
+        model.mdl_file.header.checksum,
+        model.vvd_file.header.checksum
+    );
+    assert_eq!(
+        model.vvd_file.header.checksum,
+        model.vtx_file.header.checksum
+    );
 }
 
 #[test]

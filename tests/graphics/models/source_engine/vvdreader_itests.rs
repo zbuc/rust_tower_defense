@@ -6,7 +6,9 @@ use rust_tower_defense::graphics::models::source_engine::vvd_reader;
 
 #[test]
 fn load_vvd() {
-    let vvdfile = vvd_reader::read_vvd_file_from_disk("source_assets/models/player/ctm_sas_variantA.vvd").unwrap();
+    let vvdfile =
+        vvd_reader::read_vvd_file_from_disk("source_assets/models/player/ctm_sas_variantA.vvd")
+            .unwrap();
 
     // The header of a VVD file should be "IDSV"
     let vvd_header: [u8; 4] = [0x49, 0x44, 0x53, 0x56];
@@ -14,7 +16,12 @@ fn load_vvd() {
 
     assert_eq!(vvdfile.header.id, vvd_header_i32);
     assert_eq!(vvdfile.header.version, 4);
-    assert_eq!(mem::size_of::<vvd_reader::VVDFileHeader>() as i32, vvdfile.header.fixup_table_start);
+    assert_eq!(
+        mem::size_of::<vvd_reader::VVDFileHeader>() as i32,
+        vvdfile.header.fixup_table_start
+    );
+
+    assert_eq!(vvdfile.fixup_table.num_vertexes, 0);
 }
 
 #[test]

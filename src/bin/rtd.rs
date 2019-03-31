@@ -1,12 +1,13 @@
 #![deny(clippy::all)]
 
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 
 extern crate rust_tower_defense;
 
 use rust_tower_defense::geometry::Polygon;
-use rust_tower_defense::{game, graphics};
 use rust_tower_defense::logging;
+use rust_tower_defense::{game, graphics};
 
 fn main() {
     // instantiate logging

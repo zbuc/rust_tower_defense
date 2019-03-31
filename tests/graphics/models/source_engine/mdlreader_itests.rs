@@ -7,7 +7,8 @@ use rust_tower_defense::graphics::models::source_engine::mdl_reader;
 #[test]
 fn load_model() {
     let model =
-        mdl_reader::read_mdl_file_from_disk("source_assets/models/player/ctm_sas_variantA.mdl").unwrap();
+        mdl_reader::read_mdl_file_from_disk("source_assets/models/player/ctm_sas_variantA.mdl")
+            .unwrap();
 
     // The header of an MDL file should be "IDST"
     let mdl_header: [u8; 4] = [0x49, 0x44, 0x53, 0x54];

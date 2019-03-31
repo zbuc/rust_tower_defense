@@ -1,7 +1,7 @@
 extern crate log;
 
-use log::{Record, Level, Metadata};
-use log::{SetLoggerError, LevelFilter};
+use log::{Level, Metadata, Record};
+use log::{LevelFilter, SetLoggerError};
 
 pub struct GameLogger;
 
@@ -22,6 +22,5 @@ impl log::Log for GameLogger {
 pub static LOGGER: GameLogger = GameLogger;
 
 pub fn init() -> Result<(), SetLoggerError> {
-    log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(LevelFilter::Info))
+    log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info))
 }
