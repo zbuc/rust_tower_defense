@@ -92,6 +92,11 @@ pub struct VTXFile {
     pub bodyparts: Vec<BodyPart>,
 }
 
+pub fn read_vtx_file_by_name(name: &str) -> Result<VTXFile, VTXDeserializeError> {
+	let path = format!("{}{}{}", super::MODEL_PATH, name, ".dx90.vtx");
+	read_vtx_file_from_disk(&path)
+}
+
 /// Loads a Source Engine vtx file from disk and returns it parsed to an instance of the VTXFile struct.
 /// https://github.com/ValveSoftware/source-sdk-2013/blob/master/sp/src/public/optimize.h
 ///

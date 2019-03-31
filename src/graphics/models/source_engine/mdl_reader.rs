@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::fmt;
 use std::fs::File;
 use std::io::Read;
@@ -186,8 +186,8 @@ pub struct MDLFileHeader {
 	// Points to a series of bytes?
 	bonetablename_index: i32,
 
-	vertex_base: i32, // Placeholder for void*
-	offset_base: i32, // Placeholder for void*
+	pub vertex_base: i32, // Placeholder for void*
+	pub offset_base: i32, // Placeholder for void*
 
 	// Used with $constantdirectionallight from the QC
 	// Model should have flag #13 set if enabled
@@ -223,6 +223,11 @@ pub struct MDLFileHeader {
 pub struct MDLFile {
 	pub header: MDLFileHeader,
 	pub name: String,
+}
+
+pub fn read_mdl_file_by_name(name: &str) -> Result<MDLFile, MDLDeserializeError> {
+	let path = format!("{}{}{}", super::MODEL_PATH, name, ".mdl");
+	read_mdl_file_from_disk(&path)
 }
 
 /// Loads a Source Engine mdl file from disk and returns it parsed to an instance of the MDLFile struct.
