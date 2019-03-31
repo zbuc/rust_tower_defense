@@ -54,6 +54,22 @@ pub struct VVDFileHeader
 	pub tangent_data_start: i32, // offset from base to tangent block
 }
 
+// apply sequentially to lod sorted vertex and tangent pools to re-establish mesh order
+#[derive(Copy, Clone)]
+struct vertexFileFixup_t
+{
+	lod: i32, // used to skip culled root lod
+	sourceVertexID: i32, // absolute index from start of vertex/tangent blocks
+	numVertexes: i32,
+}
+
+// How the fixup table is used when loading vertex data:
+
+// If there's no fixup table (numFixups is 0) then all the vertices are loaded
+// If there is, then the engine iterates through all the fixups. If the LOD of a fixup is superior or equal to the required LOD, it loads the vertices associated with that fixup (see sourceVertexID and numVertices).
+// A fixup seems to be generated for instance if a vertex has a different position from a parent LOD.
+
+
 #[derive(Copy, Clone)]
 pub struct VVDFile {
 	pub header: VVDFileHeader,
