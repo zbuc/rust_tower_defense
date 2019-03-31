@@ -2,6 +2,7 @@ pub mod mdl_reader;
 pub mod vtx_reader;
 
 use std::error::Error;
+use std::fmt;
 
 pub const MODEL_PATH: &str = "source_assets/models/";
 
@@ -16,9 +17,36 @@ pub struct SourceEngineModel {
     pub vtx_file: vtx_reader::VTXFile,
 }
 
+#[derive(Debug)]
+pub struct ModelLoadError {
+    details: String
+}
+
+impl ModelLoadError {
+    fn new(msg: &str) -> ModelLoadError {
+        ModelLoadError{details: msg.to_string()}
+    }
+}
+
+impl fmt::Display for ModelLoadError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f,"{}",self.details)
+    }
+}
+
+impl Error for ModelLoadError {
+    fn description(&self) -> &str {
+        &self.details
+    }
+}
+
 pub fn read_source_engine_model(name: &str) -> Result<SourceEngineModel, Box<dyn Error>> {
     let mdl_file = mdl_reader::read_mdl_file_by_name(name)?;
     let vtx_file = vtx_reader::read_vtx_file_by_name(name)?;
+
+    if mdl_file.header.bodypart_count as usize != vtx_file.bodyparts.len() {
+        return Err(Box::new(ModelLoadError::new(&format!("Unable to load Source engine model {}", name))));
+    }
 
     Ok(SourceEngineModel {
         mdl_file,
