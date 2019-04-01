@@ -43,6 +43,17 @@ macro_rules! copy_c_struct {
 
         struct_from_c
     }};
+    ($type:ty,$start_index:expr,$i:expr,$data_ptr:ident) => {{
+        let struct_start_index = mem::size_of::<$type>() * $i as usize  + $start_index;
+        let struct_end_index = struct_start_index + mem::size_of::<$type>();
+
+        let struct_data_ptr: *const u8 =
+            $data_ptr[struct_start_index..struct_end_index].as_ptr();
+        let struct_ptr: *const $type = struct_data_ptr as *const _;
+        let struct_from_c: &$type = unsafe { &*struct_ptr };
+
+        struct_from_c
+    }};
 }
 
 #[derive(Debug)]

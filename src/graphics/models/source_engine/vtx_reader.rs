@@ -175,9 +175,12 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
         Err(_e) => return Err(VTXDeserializeError::new("Error reading vtx file contents")),
     };
 
-    let header_data_ptr: *const u8 = vtx_data_bytes[0..mem::size_of::<VTXFileHeader>()].as_ptr();
-    let header_ptr: *const VTXFileHeader = header_data_ptr as *const _;
-    let header: &VTXFileHeader = unsafe { &*header_ptr };
+    let header: &VTXFileHeader = copy_c_struct!(
+        VTXFileHeader,
+        0,
+        0,
+        vtx_data_bytes
+    );
 
     // The first 4 bytes of a VTX file should be a version, 7 (OPTIMIZED_MODEL_FILE_VERSION)
     if header.version != OPTIMIZED_MODEL_FILE_VERSION {
