@@ -30,6 +30,21 @@ pub struct SourceModelVector(f32, f32, f32);
 #[derive(Copy, Clone)]
 pub struct SourceModelVector2D(f32, f32);
 
+#[macro_export]
+macro_rules! copy_c_struct {
+    ($type:ty,$start_index:expr,$i:ident,$data_ptr:ident) => {{
+        let struct_start_index = mem::size_of::<$type>() * $i as usize  + $start_index;
+        let struct_end_index = struct_start_index + mem::size_of::<$type>();
+
+        let struct_data_ptr: *const u8 =
+            $data_ptr[struct_start_index..struct_end_index].as_ptr();
+        let struct_ptr: *const $type = struct_data_ptr as *const _;
+        let struct_from_c: &$type = unsafe { &*struct_ptr };
+
+        struct_from_c
+    }};
+}
+
 #[derive(Debug)]
 pub struct ModelLoadError {
     details: String,

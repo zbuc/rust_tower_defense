@@ -4,6 +4,8 @@ use std::fs::File;
 use std::io::Read;
 use std::mem;
 
+use crate::copy_c_struct;
+
 // https://developer.valvesoftware.com/wiki/Model
 
 #[derive(Debug)]
@@ -98,16 +100,16 @@ pub struct VTXFileModelLODHeader {
 #[derive(Copy, Clone)]
 pub struct VTXFileStripGroupHeader {
     // These are the arrays of all verts and indices for this mesh.  strips index into this.
-	pub num_verts: i32,
-	pub vert_offset: i32,
+    pub num_verts: i32,
+    pub vert_offset: i32,
 
-	pub num_indices: i32,
-	pub index_offset: i32,
+    pub num_indices: i32,
+    pub index_offset: i32,
 
-	pub num_strips: i32,
-	pub strip_offset: i32,
+    pub num_strips: i32,
+    pub strip_offset: i32,
 
-	pub flags: u8,
+    pub flags: u8,
 }
 
 #[derive(Clone)]
@@ -189,13 +191,14 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
 
     for x in 0..header.num_body_parts {
         debug!("Loading body part {}", x);
-        let bodypart_start_index = (x + 1) as usize * mem::size_of::<VTXFileHeader>();
-        let bodypart_end_index = bodypart_start_index + mem::size_of::<VTXFileBodyPartHeader>();
-
-        let bodyparts_data_ptr: *const u8 =
-            vtx_data_bytes[bodypart_start_index..bodypart_end_index].as_ptr();
-        let bodyparts_ptr: *const VTXFileBodyPartHeader = bodyparts_data_ptr as *const _;
-        let bodyparts_header: &VTXFileBodyPartHeader = unsafe { &*bodyparts_ptr };
+        let bodypart_start_index =
+            header.body_part_offset as usize + x as usize * mem::size_of::<VTXFileHeader>();
+        let bodyparts_header: &VTXFileBodyPartHeader = copy_c_struct!(
+            VTXFileBodyPartHeader,
+            mem::size_of::<VTXFileHeader>(),
+            x,
+            vtx_data_bytes
+        );
 
         let mut models: Vec<Model> = Vec::new();
 
