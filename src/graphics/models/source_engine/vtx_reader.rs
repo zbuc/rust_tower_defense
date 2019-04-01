@@ -190,7 +190,6 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
     }
 
     let mut bodyparts: Vec<BodyPart> = Vec::new();
-    let mut bodypart_headers: Vec<VTXFileBodyPartHeader> = Vec::new();
 
     for x in 0..header.num_body_parts {
         debug!("Loading body part {}", x);
@@ -209,25 +208,24 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
             debug!("Loading body part {}, model {}", x, y);
             let model_start_index =
                 bodypart_start_index + ((y + 1) * bodyparts_header.model_offset) as usize;
-            let model_end_index = model_start_index + mem::size_of::<VTXFileModelHeader>();
-
-            let model_data_ptr: *const u8 =
-                vtx_data_bytes[model_start_index..model_end_index].as_ptr();
-            let model_ptr: *const VTXFileModelHeader = model_data_ptr as *const _;
-            let model_header: &VTXFileModelHeader = unsafe { &*model_ptr };
+            let model_header: &VTXFileModelHeader = copy_c_struct!(
+                VTXFileModelHeader,
+                bodypart_start_index + bodyparts_header.model_offset as usize,
+                y,
+                vtx_data_bytes
+            );
 
             let mut lods: Vec<LOD> = Vec::new();
 
+            info!("num lods {}", model_header.num_lods);
             for z in 0..model_header.num_lods {
                 debug!("Loading body part {}, model {}, lod {}", x, y, z);
-                let lod_start_index =
-                    model_start_index + ((z + 1) * model_header.lod_offset) as usize;
-                let lod_end_index = model_start_index + mem::size_of::<VTXFileModelLODHeader>();
-
-                let lod_data_ptr: *const u8 =
-                    vtx_data_bytes[lod_start_index..lod_end_index].as_ptr();
-                let lod_ptr: *const VTXFileModelLODHeader = lod_data_ptr as *const _;
-                let lod_header: &VTXFileModelLODHeader = unsafe { &*lod_ptr };
+                let lod_header: &VTXFileModelLODHeader = copy_c_struct!(
+                    VTXFileModelLODHeader,
+                    model_start_index + model_header.lod_offset as usize,
+                    z,
+                    vtx_data_bytes
+                );
 
                 lods.push(LOD {
                     header: *lod_header,
