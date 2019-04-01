@@ -137,14 +137,17 @@ pub fn read_vvd_file_from_disk(path: &str) -> Result<VVDFile, VVDDeserializeErro
     }
 
     if header.num_fixups > 0 {
-        info!("loading fixups -- not working yet");
+        warn!("loading fixups -- not working yet");
         let fixup_start_index: usize = header.fixup_table_start as usize;
         let fixup_end_index: usize =
             header.fixup_table_start as usize + mem::size_of::<VVDFileFixupTable>();
 
-        let fixup_data_ptr: *const u8 = vvd_data_bytes[fixup_start_index..fixup_end_index].as_ptr();
-        let fixup_ptr: *const VVDFileFixupTable = fixup_data_ptr as *const _;
-        let fixup_table: &VVDFileFixupTable = unsafe { &*fixup_ptr };
+        let fixup_table: &VVDFileFixupTable = copy_c_struct!(
+            VVDFileFixupTable,
+            fixup_start_index,
+            0,
+            vvd_data_bytes
+        );
 
         assert!(fixup_end_index <= header.vertex_data_start as usize);
 
@@ -162,10 +165,12 @@ pub fn read_vvd_file_from_disk(path: &str) -> Result<VVDFile, VVDDeserializeErro
     let mut vertex_end_index = vertex_start_index + mem::size_of::<VVDFileVertex>();
     let mut i = 0 as usize;
     while vertex_start_index <= header.tangent_data_start as usize {
-        let vertex_data_ptr: *const u8 =
-            vvd_data_bytes[vertex_start_index..vertex_end_index].as_ptr();
-        let vertex_ptr: *const VVDFileVertex = vertex_data_ptr as *const _;
-        let vertex: &VVDFileVertex = unsafe { &*vertex_ptr };
+        let vertex: &VVDFileVertex = copy_c_struct!(
+            VVDFileVertex,
+            vertex_start_index,
+            0,
+            vvd_data_bytes
+        );
 
         vertices.push(*vertex);
 
