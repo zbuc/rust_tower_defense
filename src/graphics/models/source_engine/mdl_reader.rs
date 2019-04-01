@@ -3,6 +3,9 @@ use std::ffi::CStr;
 use std::fmt;
 use std::fs::File;
 use std::io::Read;
+use std::mem;
+
+use crate::copy_c_struct;
 
 // https://developer.valvesoftware.com/wiki/Model
 
@@ -249,9 +252,12 @@ pub fn read_mdl_file_from_disk(path: &str) -> Result<MDLFile, MDLDeserializeErro
         Err(_e) => return Err(MDLDeserializeError::new("Error reading mdl file contents")),
     };
 
-    let data_ptr: *const u8 = model_data_bytes.as_ptr();
-    let header_ptr: *const MDLFileHeader = data_ptr as *const _;
-    let header: &MDLFileHeader = unsafe { &*header_ptr };
+    let header: &MDLFileHeader = copy_c_struct!(
+		MDLFileHeader,
+		0,
+		0,
+		model_data_bytes
+	);
 
     if header.id != MDL_HEADER {
         return Err(MDLDeserializeError::new(
