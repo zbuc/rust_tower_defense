@@ -4,6 +4,8 @@ use std::fs::File;
 use std::io::Read;
 use std::mem;
 
+use crate::copy_c_struct;
+
 // https://developer.valvesoftware.com/wiki/VVD
 
 #[derive(Debug)]
@@ -121,19 +123,12 @@ pub fn read_vvd_file_from_disk(path: &str) -> Result<VVDFile, VVDDeserializeErro
         Err(_e) => return Err(VVDDeserializeError::new("Error reading vvd file contents")),
     };
 
-    let data_ptr: *const u8 = vvd_data_bytes.as_ptr();
-    let header_ptr: *const VVDFileHeader = data_ptr as *const _;
-    let header: &VVDFileHeader = unsafe { &*header_ptr };
-
-    if header.id != VVD_HEADER {
-        return Err(VVDDeserializeError::new(
-            "vvd header not correct; expected [0x49, 0x44, 0x53, 0x56]",
-        ));
-    }
-
-    let data_ptr: *const u8 = vvd_data_bytes.as_ptr();
-    let header_ptr: *const VVDFileHeader = data_ptr as *const _;
-    let header: &VVDFileHeader = unsafe { &*header_ptr };
+    let header: &VVDFileHeader = copy_c_struct!(
+        VVDFileHeader,
+        0,
+        0,
+        vvd_data_bytes
+    );
 
     if header.id != VVD_HEADER {
         return Err(VVDDeserializeError::new(
