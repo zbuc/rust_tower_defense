@@ -252,12 +252,7 @@ pub fn read_mdl_file_from_disk(path: &str) -> Result<MDLFile, MDLDeserializeErro
         Err(_e) => return Err(MDLDeserializeError::new("Error reading mdl file contents")),
     };
 
-    let header: &MDLFileHeader = copy_c_struct!(
-		MDLFileHeader,
-		0,
-		0,
-		model_data_bytes
-	);
+    let header: &MDLFileHeader = copy_c_struct!(MDLFileHeader, 0, 0, model_data_bytes);
 
     if header.id != MDL_HEADER {
         return Err(MDLDeserializeError::new(

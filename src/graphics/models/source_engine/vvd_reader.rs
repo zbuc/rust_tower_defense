@@ -123,12 +123,7 @@ pub fn read_vvd_file_from_disk(path: &str) -> Result<VVDFile, VVDDeserializeErro
         Err(_e) => return Err(VVDDeserializeError::new("Error reading vvd file contents")),
     };
 
-    let header: &VVDFileHeader = copy_c_struct!(
-        VVDFileHeader,
-        0,
-        0,
-        vvd_data_bytes
-    );
+    let header: &VVDFileHeader = copy_c_struct!(VVDFileHeader, 0, 0, vvd_data_bytes);
 
     if header.id != VVD_HEADER {
         return Err(VVDDeserializeError::new(
@@ -142,12 +137,8 @@ pub fn read_vvd_file_from_disk(path: &str) -> Result<VVDFile, VVDDeserializeErro
         let fixup_end_index: usize =
             header.fixup_table_start as usize + mem::size_of::<VVDFileFixupTable>();
 
-        let fixup_table: &VVDFileFixupTable = copy_c_struct!(
-            VVDFileFixupTable,
-            fixup_start_index,
-            0,
-            vvd_data_bytes
-        );
+        let fixup_table: &VVDFileFixupTable =
+            copy_c_struct!(VVDFileFixupTable, fixup_start_index, 0, vvd_data_bytes);
 
         assert!(fixup_end_index <= header.vertex_data_start as usize);
 
@@ -165,12 +156,8 @@ pub fn read_vvd_file_from_disk(path: &str) -> Result<VVDFile, VVDDeserializeErro
     let mut vertex_end_index = vertex_start_index + mem::size_of::<VVDFileVertex>();
     let mut i = 0 as usize;
     while vertex_start_index <= header.tangent_data_start as usize {
-        let vertex: &VVDFileVertex = copy_c_struct!(
-            VVDFileVertex,
-            vertex_start_index,
-            0,
-            vvd_data_bytes
-        );
+        let vertex: &VVDFileVertex =
+            copy_c_struct!(VVDFileVertex, vertex_start_index, 0, vvd_data_bytes);
 
         vertices.push(*vertex);
 

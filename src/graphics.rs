@@ -157,8 +157,7 @@ pub const INDICES: [u16; 642] = [
 ];
 
 pub fn run() {
-    let model =
-        source_engine::read_source_engine_model("player/ctm_sas_variantA").unwrap();
+    let model = source_engine::read_source_engine_model("player/ctm_sas_variantA").unwrap();
     info!("Model id {}", model.mdl_file.header.id);
 
     let vertices: Vec<Vertex> = model.vertices;
@@ -359,7 +358,6 @@ pub fn run() {
                 }
                 Err(err) => panic!("{:?}", err),
             };
-
 
         let command_buffer =
             AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())

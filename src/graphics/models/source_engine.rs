@@ -33,22 +33,20 @@ pub struct SourceModelVector2D(f32, f32);
 #[macro_export]
 macro_rules! copy_c_struct {
     ($type:ty,$start_index:expr,$i:ident,$data_ptr:ident) => {{
-        let struct_start_index = mem::size_of::<$type>() * $i as usize  + $start_index;
+        let struct_start_index = mem::size_of::<$type>() * $i as usize + $start_index;
         let struct_end_index = struct_start_index + mem::size_of::<$type>();
 
-        let struct_data_ptr: *const u8 =
-            $data_ptr[struct_start_index..struct_end_index].as_ptr();
+        let struct_data_ptr: *const u8 = $data_ptr[struct_start_index..struct_end_index].as_ptr();
         let struct_ptr: *const $type = struct_data_ptr as *const _;
         let struct_from_c: &$type = unsafe { &*struct_ptr };
 
         struct_from_c
     }};
     ($type:ty,$start_index:expr,$i:expr,$data_ptr:ident) => {{
-        let struct_start_index = mem::size_of::<$type>() * $i as usize  + $start_index;
+        let struct_start_index = mem::size_of::<$type>() * $i as usize + $start_index;
         let struct_end_index = struct_start_index + mem::size_of::<$type>();
 
-        let struct_data_ptr: *const u8 =
-            $data_ptr[struct_start_index..struct_end_index].as_ptr();
+        let struct_data_ptr: *const u8 = $data_ptr[struct_start_index..struct_end_index].as_ptr();
         let struct_ptr: *const $type = struct_data_ptr as *const _;
         let struct_from_c: &$type = unsafe { &*struct_ptr };
 
@@ -102,14 +100,22 @@ pub fn read_source_engine_model(name: &str) -> Result<SourceEngineModel, Box<dyn
     let mut vertices: Vec<super::super::Vertex> = Vec::new();
     for vertex in vvd_file.vertices.iter() {
         vertices.push(super::super::Vertex {
-            position: (vertex.vec_position.0, vertex.vec_position.1, vertex.vec_position.2),
+            position: (
+                vertex.vec_position.0,
+                vertex.vec_position.1,
+                vertex.vec_position.2,
+            ),
         });
     }
 
     let mut normals: Vec<super::super::Vertex> = Vec::new();
     for vertex in vvd_file.vertices.iter() {
         normals.push(super::super::Vertex {
-            position: (vertex.vec_normal.0, vertex.vec_normal.1, vertex.vec_normal.2),
+            position: (
+                vertex.vec_normal.0,
+                vertex.vec_normal.1,
+                vertex.vec_normal.2,
+            ),
         });
     }
 
