@@ -59,6 +59,7 @@ pub struct VTXFileHeader {
     pub body_part_offset: i32,
 }
 
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct VTXFileBodyPartHeader {
     //Model array
@@ -67,6 +68,7 @@ pub struct VTXFileBodyPartHeader {
 }
 
 // This maps one to one with models in the mdl file.
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct VTXFileModelHeader {
     // LOD mesh array
@@ -74,9 +76,61 @@ pub struct VTXFileModelHeader {
     pub lod_offset: i32,
 }
 
+#[repr(C)]
+#[derive(Clone)]
+pub struct VTXFileMeshHeader {
+    pub num_strip_groups: i32,
+    pub strip_group_header_offset: i32,
+
+    pub flags: u8,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct VTXFileModelLODHeader {
+    pub num_meshes: i32,
+    pub mesh_offset: i32,
+
+    pub switch_point: f32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct VTXFileStripGroupHeader {
+    // These are the arrays of all verts and indices for this mesh.  strips index into this.
+	pub num_verts: i32,
+	pub vert_offset: i32,
+
+	pub num_indices: i32,
+	pub index_offset: i32,
+
+	pub num_strips: i32,
+	pub strip_offset: i32,
+
+	pub flags: u8,
+}
+
+#[derive(Clone)]
+pub struct StripGroup {
+    pub header: VTXFileStripGroupHeader,
+}
+
+#[derive(Clone)]
+pub struct Mesh {
+    pub header: VTXFileMeshHeader,
+    pub strip_groups: Vec<StripGroup>,
+}
+
+#[derive(Clone)]
+pub struct LOD {
+    pub header: VTXFileModelLODHeader,
+    pub meshes: Vec<Mesh>,
+}
+
 #[derive(Clone)]
 pub struct Model {
     pub header: VTXFileModelHeader,
+    pub lods: Vec<LOD>,
 }
 
 #[derive(Clone)]
@@ -146,6 +200,7 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
         let mut models: Vec<Model> = Vec::new();
 
         for y in 0..bodyparts_header.num_models {
+            debug!("Loading body part {}, model {}", x, y);
             let model_start_index =
                 bodypart_start_index + ((y + 1) * bodyparts_header.model_offset) as usize;
             let model_end_index = model_start_index + mem::size_of::<VTXFileModelHeader>();
@@ -155,8 +210,28 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
             let model_ptr: *const VTXFileModelHeader = model_data_ptr as *const _;
             let model_header: &VTXFileModelHeader = unsafe { &*model_ptr };
 
+            let mut lods: Vec<LOD> = Vec::new();
+
+            for z in 0..model_header.num_lods {
+                debug!("Loading body part {}, model {}, lod {}", x, y, z);
+                let lod_start_index =
+                    model_start_index + ((z + 1) * model_header.lod_offset) as usize;
+                let lod_end_index = model_start_index + mem::size_of::<VTXFileModelLODHeader>();
+
+                let lod_data_ptr: *const u8 =
+                    vtx_data_bytes[lod_start_index..lod_end_index].as_ptr();
+                let lod_ptr: *const VTXFileModelLODHeader = lod_data_ptr as *const _;
+                let lod_header: &VTXFileModelLODHeader = unsafe { &*lod_ptr };
+
+                lods.push(LOD {
+                    header: *lod_header,
+                    meshes: Vec::new(),
+                });
+            }
+
             models.push(Model {
                 header: *model_header,
+                lods: lods,
             });
         }
 
