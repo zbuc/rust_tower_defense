@@ -247,6 +247,7 @@ pub fn run() {
         CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), indices).unwrap();
 
     let uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(device.clone(), BufferUsage::all());
+    let uniform_buffer2 = CpuBufferPool::<vs::ty::Data>::new(device.clone(), BufferUsage::all());
 
     let vs = vs::Shader::load(device.clone()).unwrap();
     let fs = fs::Shader::load(device.clone()).unwrap();
@@ -318,7 +319,7 @@ pub fn run() {
             let elapsed = rotation_start.elapsed();
             let rotation =
                 elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
-            let rotation = Matrix3::from_angle_y(Rad(rotation as f32));
+            let rotation = Matrix3::from_angle_z(Rad(rotation as f32));
 
             // note: this teapot was meant for OpenGL where the origin is at the lower left
             //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
@@ -326,9 +327,9 @@ pub fn run() {
             let proj =
                 cgmath::perspective(Rad(std::f32::consts::FRAC_PI_2), aspect_ratio, 0.01, 100.0);
             let view = Matrix4::look_at(
-                Point3::new(0.3, 0.3, 1.0),
+                Point3::new(0.3, 0.6, 1.0),
                 Point3::new(0.0, 0.0, 0.0),
-                Vector3::new(0.0, -1.0, 0.0),
+                Vector3::new(0.0, 1.0, 0.0),
             );
             let scale = Matrix4::from_scale(0.01);
 
@@ -340,10 +341,43 @@ pub fn run() {
 
             uniform_buffer.next(uniform_data).unwrap()
         };
+        let uniform_buffer2_subbuffer = {
+            let elapsed = rotation_start.elapsed();
+            let rotation =
+                elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
+            let rotation = Matrix3::from_angle_y(Rad(rotation as f32));
+
+            // note: this teapot was meant for OpenGL where the origin is at the lower left
+            //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
+            let aspect_ratio = dimensions[0] as f32 / dimensions[1] as f32;
+            let proj =
+                cgmath::perspective(Rad(std::f32::consts::FRAC_PI_2), aspect_ratio, 0.01, 100.0);
+            let view = Matrix4::look_at(
+                Point3::new(0.3, 0.6, 1.0),
+                Point3::new(0.0, 0.0, 0.0),
+                Vector3::new(0.0, 1.0, 0.0),
+            );
+            let scale = Matrix4::from_scale(0.01);
+
+            let uniform_data = vs::ty::Data {
+                world: Matrix4::from(rotation).into(),
+                view: (view * scale).into(),
+                proj: proj.into(),
+            };
+
+            uniform_buffer2.next(uniform_data).unwrap()
+        };
 
         let set = Arc::new(
             PersistentDescriptorSet::start(pipeline.clone(), 0)
                 .add_buffer(uniform_buffer_subbuffer)
+                .unwrap()
+                .build()
+                .unwrap(),
+        );
+        let set2 = Arc::new(
+            PersistentDescriptorSet::start(pipeline.clone(), 0)
+                .add_buffer(uniform_buffer2_subbuffer)
                 .unwrap()
                 .build()
                 .unwrap(),
@@ -373,6 +407,14 @@ pub fn run() {
                     &DynamicState::none(),
                     vec![vertex_buffer.clone(), normals_buffer.clone()],
                     set.clone(),
+                    (),
+                )
+                .unwrap()
+                .draw(
+                    pipeline.clone(),
+                    &DynamicState::none(),
+                    vec![vertex_buffer.clone(), normals_buffer.clone()],
+                    set2.clone(),
                     (),
                 )
                 .unwrap()
@@ -508,7 +550,8 @@ fn window_size_dependent_setup(
         GraphicsPipeline::start()
             .vertex_input(TwoBuffersDefinition::<Vertex, Normal>::new())
             .vertex_shader(vs.main_entry_point(), ())
-            .triangle_list()
+            // .triangle_list()
+            .triangle_strip()
             .viewports_dynamic_scissors_irrelevant(1)
             .viewports(iter::once(Viewport {
                 origin: [0.0, 0.0],
@@ -521,6 +564,45 @@ fn window_size_dependent_setup(
             .build(device.clone())
             .unwrap(),
     );
+
+    
+    // we probably want instanced drawing
+    // This reference here is for OpenGL but the principles still apply: https://learnopengl.com/#!Advanced-OpenGL/Instancing
+    // If you want a Vulkan specific example Sascha Willems on Github has a code sample but it doesn't have the in-depth explanation as the previous link: https://github.com/SaschaWillems/Vulkan/tree/master/instancing
+    // I've managed to achieve the desired effect of rendering many models by queuing up all the draw calls in a single command buffer and using a dynamic uniform buffer to pass the required model mat4 data to the shader
+
+    // from vulkano tests:
+    // i think i want one of the triangle strip topologies: https://vulkan.lunarg.com/doc/view/1.0.33.0/linux/vkspec.chunked/ch19s01.html
+    // let result = GraphicsPipeline::new(&device, GraphicsPipelineParams {
+    //     vertex_input: SingleBufferDefinition::<()>::new(),
+    //     vertex_shader: unsafe {
+    //         vs.vertex_shader_entry_point::<(), _, _, _>(&CString::new("main").unwrap(),
+    //                                                     EmptyShaderInterfaceDef,
+    //                                                     EmptyShaderInterfaceDef,
+    //                                                     EmptyPipelineDesc)
+    //     },
+    //     input_assembly: InputAssembly {
+    //         topology: PrimitiveTopology::TriangleList,
+    //         primitive_restart_enable: true,
+    //     },
+    //     tessellation: None,
+    //     geometry_shader: None,
+    //     viewport: ViewportsState::Dynamic { num: 1 },
+    //     raster: Default::default(),
+    //     multisample: Multisample::disabled(),
+    //     fragment_shader: unsafe {
+    //         fs.fragment_shader_entry_point::<(), _, _, _>(&CString::new("main").unwrap(),
+    //                                                       EmptyShaderInterfaceDef,
+    //                                                       EmptyShaderInterfaceDef,
+    //                                                       EmptyPipelineDesc)
+    //     },
+    //     depth_stencil: DepthStencil::disabled(),
+    //     blend: Blend::pass_through(),
+    //     render_pass: Subpass::from(simple_rp::CustomRenderPass::new(&device, &{
+    //         simple_rp::Formats { color: (Format::R8G8B8A8Unorm, 1) }
+    //     }).unwrap(), 0).unwrap(),
+    // });
+
 
     (pipeline, framebuffers)
 }
