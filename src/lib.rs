@@ -7,6 +7,7 @@ pub mod graphics;
 pub mod logging;
 
 extern crate bincode;
+extern crate gfx_hal as hal;
 extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;

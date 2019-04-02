@@ -511,3 +511,5 @@ mod fs {
         path: "source_assets/shaders/teapot_frag.glsl"
     }
 }
+
+type ShaderData = Vec<u8>;
