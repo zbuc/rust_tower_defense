@@ -7,6 +7,25 @@ license = "MIT"
 description = "The Rust Tower Defense project, blogged at https://czub.us/blog/rust_gamedev/"
 
 [dependencies]
+<<<<<<< HEAD
+rand = "0.6.5"
+serde = "1.0.87"
+serde_json = "1.0.38"
+serde_derive = "1.0.87"
+bincode = "1.1.1"
+glsl-to-spirv = "=0.1.7"
+image = "0.21"
+env_logger = "0.6.0"
+log = "0.4"
+arrayvec = "0.4.10"
+shaderc = "0.3"
+vulkano = "0.11"
+vulkano-shaders = "0.11"
+vulkano-win = "0.11"
+cgmath = "0.16"
+winit = "0.18"
+time = "0.1.37"
+=======
 rand = "0.6"
 serde = "1.0"
 serde_json = "1.0"
@@ -50,16 +69,20 @@ path = "../gfx/src/backend/dx12/"
 [dependencies.gfx-hal]
 #version = "0.1"
 path = "../gfx/src/hal"
+>>>>>>> 054f73876cdb3820a57efd40029dc857a48350af
 
 [build-dependencies]
 glsl-to-spirv = "=0.1.7"
 
 [features]
 default = []
+<<<<<<< HEAD
+=======
 metal = ["gfx-backend-metal"]
 gl = ["gfx-backend-gl"]
 dx12 = ["gfx-backend-dx12"]
 #vulkan = ["gfx-backend-vulkan"]
+>>>>>>> 054f73876cdb3820a57efd40029dc857a48350af
 unstable = []
 
 [[bin]]
