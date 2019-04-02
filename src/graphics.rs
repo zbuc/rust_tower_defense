@@ -434,6 +434,33 @@ pub fn run() {
                 event: winit::WindowEvent::Resized(_),
                 ..
             } => recreate_swapchain = true,
+            // winit::Event::WindowEvent {
+            //     event: winit::WindowEvent::Resized(_),
+            //     ..
+            // } => recreate_swapchain = true,
+            // winit::Event::WindowEvent {
+            //     event: winit::WindowEvent::CursorMoved { position, .. },
+            //     ..
+            // } => {
+            //     output = UserInput::NewMousePosition(Some((position.x, position.y)));
+            // }
+            // event::Event::WindowEvent { event, .. } => match event {
+            //     event::WindowEvent::KeyboardInput {
+            //         input:
+            //             winit::KeyboardInput {
+            //                 virtual_keycode: Some(virtual_code),
+            //                 state,
+            //                 ..
+            //             },
+            //         ..
+            //     } => match (virtual_code, state) {
+            //         (winit::VirtualKeyCode::Escape, _) => {
+            //             output = UserInput::EndRequested;
+            //         }
+            //         _ => (),
+            //     },
+            //     _ => (),
+            // },
             _ => (),
         });
         if done {
