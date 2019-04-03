@@ -152,52 +152,43 @@ struct VTXDeserializer {
     path: String,
 }
 
+// https://github.com/ValveSoftware/source-sdk-2013/blob/0d8dceea4310fde5706b3ce1c70609d72a38efdf/mp/src/utils/vrad/vradstaticprops.cpp#L1224
 impl VTXDeserializer {
     pub fn new(path: String) -> Self {
         VTXDeserializer { path }
     }
 
-    pub fn read_strip_groups(
-        &self,
-        vtx_data_bytes: &[u8],
-    ) -> Result<Vec<StripGroup>, VTXDeserializeError> {
+    pub fn read_strip_groups(&self, vtx_data_bytes: &[u8],) -> Result<Vec<StripGroup>, VTXDeserializeError> {
         let mut strip_groups: Vec<StripGroup> = Vec::new();
 
-        // for strip_group_num in 0..mesh_header.num_strip_groups {
-        // info!(
-        //     "Loading body part {}, model {}, lod {}, mesh {}, strip group {}",
-        //     body_part_num, model_num, lod_num, mesh_num, strip_group_num
-        // );
+            // for strip_group_num in 0..mesh_header.num_strip_groups {
+                // info!(
+                //     "Loading body part {}, model {}, lod {}, mesh {}, strip group {}",
+                //     body_part_num, model_num, lod_num, mesh_num, strip_group_num
+                // );
 
-        // let strip_group_start_index = mesh_start_index
-        //     + mesh_header.strip_group_header_offset as usize
-        //     + (strip_group_num as usize
-        //         * mem::size_of::<VTXFileStripGroupHeader>())
-        //         as usize;
-        // let strip_header: &VTXFileStripGroupHeader = copy_c_struct!(
-        //     VTXFileStripGroupHeader,
-        //     strip_group_start_index,
-        //     strip_group_num,
-        //     vtx_data_bytes
-        // );
+                // let strip_group_start_index = mesh_start_index
+                //     + mesh_header.strip_group_header_offset as usize
+                //     + (strip_group_num as usize
+                //         * mem::size_of::<VTXFileStripGroupHeader>())
+                //         as usize;
+                // let strip_header: &VTXFileStripGroupHeader = copy_c_struct!(
+                //     VTXFileStripGroupHeader,
+                //     strip_group_start_index,
+                //     strip_group_num,
+                //     vtx_data_bytes
+                // );
 
-        // strip_groups.push(StripGroup {
-        //     header: *strip_header,
-        // });
-        // }
+                // strip_groups.push(StripGroup {
+                //     header: *strip_header,
+                // });
+            // }
+
 
         Ok(strip_groups)
     }
 
-    pub fn read_meshes(
-        &self,
-        lod_header: &VTXFileModelLODHeader,
-        lod_start_index: usize,
-        body_part_num: usize,
-        model_num: usize,
-        lod_num: usize,
-        vtx_data_bytes: &[u8],
-    ) -> Result<Vec<Mesh>, VTXDeserializeError> {
+    pub fn read_meshes(&self, lod_header: &VTXFileModelLODHeader, lod_start_index: usize, body_part_num: usize, model_num: usize, lod_num: usize, vtx_data_bytes: &[u8],) -> Result<Vec<Mesh>, VTXDeserializeError> {
         let mut mesh_headers: Vec<VTXFileMeshHeader> = Vec::new();
         let mut mesh_start_indices: Vec<usize> = Vec::new();
 
@@ -232,7 +223,7 @@ impl VTXDeserializer {
                 strip_groups,
             });
         }
-
+        
         Ok(meshes)
     }
 
@@ -270,14 +261,7 @@ impl VTXDeserializer {
         let mut lods: Vec<LOD> = Vec::new();
 
         for lod_num in 0..model_header.num_lods {
-            let meshes: Vec<Mesh> = self.read_meshes(
-                &lod_headers[lod_num as usize],
-                lod_start_indices[lod_num as usize],
-                body_part_num,
-                model_num,
-                lod_num as usize,
-                vtx_data_bytes,
-            )?;
+            let meshes: Vec<Mesh> = self.read_meshes(&lod_headers[lod_num as usize], lod_start_indices[lod_num as usize], body_part_num, model_num, lod_num as usize, vtx_data_bytes)?;
 
             lods.push(LOD {
                 header: lod_headers[lod_num as usize],
