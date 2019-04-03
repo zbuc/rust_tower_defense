@@ -162,17 +162,18 @@ struct VTXDeserializer {
 impl VTXDeserializer {
     pub fn new(path: String) -> Self {
         let state = HashMap::new();
-        VTXDeserializer{
-            path,
-            state,
-        }
+        VTXDeserializer { path, state }
     }
 
-    pub fn read_bodyparts(&self, vtx_data_bytes: &[u8]) -> Result<Vec<BodyPart>, VTXDeserializeError> {
-        let header: &VTXFileHeader = match self.state.get("file_header").expect("should have header") {
-            VTXFilePart::FileHeader(h) => &h,
-            _ => panic!("file_header should always be a VTXFileHeader"),
-        };
+    pub fn read_bodyparts(
+        &self,
+        vtx_data_bytes: &[u8],
+    ) -> Result<Vec<BodyPart>, VTXDeserializeError> {
+        let header: &VTXFileHeader =
+            match self.state.get("file_header").expect("should have header") {
+                VTXFilePart::FileHeader(h) => &h,
+                _ => panic!("file_header should always be a VTXFileHeader"),
+            };
 
         let mut bodyparts: Vec<BodyPart> = Vec::new();
 
@@ -223,12 +224,15 @@ impl VTXDeserializer {
 
                     info!("num meshes {}", lod_header.num_meshes);
                     for mesh_num in 0..lod_header.num_meshes {
-                        debug!(
+                        info!(
                             "Loading body part {}, model {}, lod {}, mesh {}",
                             body_part_num, model_num, lod_num, mesh_num
                         );
-                        let mesh_start_index =
-                            lod_start_index + ((mesh_num + 1) * lod_header.mesh_offset) as usize;
+                        let mesh_start_index = lod_start_index
+                            + lod_header.mesh_offset as usize
+                            + (mesh_num as usize * mem::size_of::<VTXFileMeshHeader>()) as usize;
+                        info!("mesh_start_index: {}", mesh_start_index);
+                        // panic!("eff");
                         let mesh_header: &VTXFileMeshHeader = copy_c_struct!(
                             VTXFileMeshHeader,
                             mesh_start_index,
@@ -237,12 +241,34 @@ impl VTXDeserializer {
                         );
 
                         let mut strip_groups: Vec<StripGroup> = Vec::new();
-                        let mesh = Mesh {
+
+                        for strip_group_num in 0..mesh_header.num_strip_groups {
+                            // info!(
+                            //     "Loading body part {}, model {}, lod {}, mesh {}, strip group {}",
+                            //     body_part_num, model_num, lod_num, mesh_num, strip_group_num
+                            // );
+
+                            // let strip_group_start_index = mesh_start_index
+                            //     + mesh_header.strip_group_header_offset as usize
+                            //     + (strip_group_num as usize
+                            //         * mem::size_of::<VTXFileStripGroupHeader>())
+                            //         as usize;
+                            // let strip_header: &VTXFileStripGroupHeader = copy_c_struct!(
+                            //     VTXFileStripGroupHeader,
+                            //     strip_group_start_index,
+                            //     strip_group_num,
+                            //     vtx_data_bytes
+                            // );
+
+                            // strip_groups.push(StripGroup {
+                            //     header: *strip_header,
+                            // });
+                        }
+
+                        meshes.push(Mesh {
                             header: *mesh_header,
                             strip_groups,
-                        };
-
-                        meshes.push(mesh);
+                        });
                     }
 
                     lods.push(LOD {
@@ -291,7 +317,8 @@ impl VTXDeserializer {
             ));
         }
 
-        self.state.insert("file_header".to_string(), VTXFilePart::FileHeader(*header));
+        self.state
+            .insert("file_header".to_string(), VTXFilePart::FileHeader(*header));
         // let mut bodyparts: Vec<BodyPart> = Vec::new();
         let mut bodyparts: Vec<BodyPart> = self.read_bodyparts(&vtx_data_bytes)?;
 
