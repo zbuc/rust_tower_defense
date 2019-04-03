@@ -30,6 +30,11 @@ pub struct SourceModelVector(f32, f32, f32);
 #[derive(Copy, Clone)]
 pub struct SourceModelVector2D(f32, f32);
 
+// @chris see here: https://stackoverflow.com/a/25411013/3317191
+// tl;dr instantiate the struct you want to fill with zeroed or uninitialised memory, then unsafely access its memory as a mutable slice and read into that. (edited) 
+// Or just implement a parser for the serialised struct using byteorder and call it a day.
+// you can also first read the data into any kind of `AsRef<[u8]>` container and then use `str::from_utf8` to obtain a `str` of its contents
+// or if you read into a `Vec` you can do a zero copy conversion to a `String` with `String::from_utf8()`
 #[macro_export]
 macro_rules! copy_c_struct {
     ($type:ty,$start_index:expr,$i:ident,$data_ptr:ident) => {{

@@ -26,6 +26,7 @@ fn load_vtx() {
 
     assert_eq!(vtxfile.bodyparts[0].models.len(), 1);
     assert_eq!(vtxfile.bodyparts[0].models[0].lods.len(), 1);
+    assert_eq!(vtxfile.bodyparts[0].models[0].lods[0].header.mesh_offset, 12);
 }
 
 #[test]
