@@ -215,7 +215,7 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
             info!("num lods {}", model_header.num_lods);
             for lod_num in 0..model_header.num_lods {
                 debug!("Loading body part {}, model {}, lod {}", body_part_num, model_num, lod_num);
-                let lod_start_index = model_start_index + model_header.lod_offset as usize;
+                let lod_start_index = model_start_index + ((lod_num + 1) * model_header.lod_offset) as usize;
                 let lod_header: &VTXFileModelLODHeader = copy_c_struct!(
                     VTXFileModelLODHeader,
                     lod_start_index,
@@ -226,7 +226,7 @@ pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeErro
                 let meshes: Vec<Mesh> = Vec::new();
                 for mesh_num in 0..lod_header.num_meshes {
                     debug!("Loading body part {}, model {}, lod {}, mesh {}", body_part_num, model_num, lod_num, mesh_num);
-                    let mesh_start_index = lod_start_index + lod_header.mesh_offset as usize;
+                    let mesh_start_index = lod_start_index + ((mesh_num + 1) * lod_header.mesh_offset) as usize;
                     let mesh_header: &VTXFileMeshHeader = copy_c_struct!(
                         VTXFileMeshHeader,
                         mesh_start_index,
