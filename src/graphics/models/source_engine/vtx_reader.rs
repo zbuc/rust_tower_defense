@@ -157,6 +157,85 @@ impl VTXDeserializer {
         VTXDeserializer { path }
     }
 
+    pub fn read_strip_groups(
+        &self,
+        vtx_data_bytes: &[u8],
+    ) -> Result<Vec<StripGroup>, VTXDeserializeError> {
+        let mut strip_groups: Vec<StripGroup> = Vec::new();
+
+        // for strip_group_num in 0..mesh_header.num_strip_groups {
+        // info!(
+        //     "Loading body part {}, model {}, lod {}, mesh {}, strip group {}",
+        //     body_part_num, model_num, lod_num, mesh_num, strip_group_num
+        // );
+
+        // let strip_group_start_index = mesh_start_index
+        //     + mesh_header.strip_group_header_offset as usize
+        //     + (strip_group_num as usize
+        //         * mem::size_of::<VTXFileStripGroupHeader>())
+        //         as usize;
+        // let strip_header: &VTXFileStripGroupHeader = copy_c_struct!(
+        //     VTXFileStripGroupHeader,
+        //     strip_group_start_index,
+        //     strip_group_num,
+        //     vtx_data_bytes
+        // );
+
+        // strip_groups.push(StripGroup {
+        //     header: *strip_header,
+        // });
+        // }
+
+        Ok(strip_groups)
+    }
+
+    pub fn read_meshes(
+        &self,
+        lod_header: &VTXFileModelLODHeader,
+        lod_start_index: usize,
+        body_part_num: usize,
+        model_num: usize,
+        lod_num: usize,
+        vtx_data_bytes: &[u8],
+    ) -> Result<Vec<Mesh>, VTXDeserializeError> {
+        let mut mesh_headers: Vec<VTXFileMeshHeader> = Vec::new();
+        let mut mesh_start_indices: Vec<usize> = Vec::new();
+
+        info!("num meshes {}", lod_header.num_meshes);
+        for mesh_num in 0..lod_header.num_meshes {
+            info!(
+                "Loading body part {}, model {}, lod {}, mesh {}",
+                body_part_num, model_num, lod_num, mesh_num
+            );
+            let mesh_start_index = lod_start_index
+                + lod_header.mesh_offset as usize
+                + (mesh_num as usize * mem::size_of::<VTXFileMeshHeader>()) as usize;
+            info!("mesh_start_index: {}", mesh_start_index);
+            // panic!("eff");
+            let mesh_header: &VTXFileMeshHeader = copy_c_struct!(
+                VTXFileMeshHeader,
+                mesh_start_index,
+                mesh_num,
+                vtx_data_bytes
+            );
+            mesh_headers.push(*mesh_header);
+            mesh_start_indices.push(mesh_start_index);
+        }
+
+        let mut meshes: Vec<Mesh> = Vec::new();
+
+        for mesh_num in 0..lod_header.num_meshes {
+            let strip_groups: Vec<StripGroup> = self.read_strip_groups(vtx_data_bytes)?;
+
+            meshes.push(Mesh {
+                header: mesh_headers[mesh_num as usize],
+                strip_groups,
+            });
+        }
+
+        Ok(meshes)
+    }
+
     pub fn read_lods(
         &self,
         model_header: &VTXFileModelHeader,
@@ -165,7 +244,8 @@ impl VTXDeserializer {
         model_num: usize,
         vtx_data_bytes: &[u8],
     ) -> Result<Vec<LOD>, VTXDeserializeError> {
-        let mut lods: Vec<LOD> = Vec::new();
+        let mut lod_headers: Vec<VTXFileModelLODHeader> = Vec::new();
+        let mut lod_start_indices: Vec<usize> = Vec::new();
 
         info!("num lods {}", model_header.num_lods);
         for lod_num in 0..model_header.num_lods {
@@ -183,59 +263,24 @@ impl VTXDeserializer {
                 vtx_data_bytes
             );
 
-            let mut meshes: Vec<Mesh> = Vec::new();
+            lod_headers.push(*lod_header);
+            lod_start_indices.push(lod_start_index);
+        }
 
-            info!("num meshes {}", lod_header.num_meshes);
-            for mesh_num in 0..lod_header.num_meshes {
-                info!(
-                    "Loading body part {}, model {}, lod {}, mesh {}",
-                    body_part_num, model_num, lod_num, mesh_num
-                );
-                let mesh_start_index = lod_start_index
-                    + lod_header.mesh_offset as usize
-                    + (mesh_num as usize * mem::size_of::<VTXFileMeshHeader>()) as usize;
-                info!("mesh_start_index: {}", mesh_start_index);
-                // panic!("eff");
-                let mesh_header: &VTXFileMeshHeader = copy_c_struct!(
-                    VTXFileMeshHeader,
-                    mesh_start_index,
-                    mesh_num,
-                    vtx_data_bytes
-                );
+        let mut lods: Vec<LOD> = Vec::new();
 
-                let mut strip_groups: Vec<StripGroup> = Vec::new();
-
-                for strip_group_num in 0..mesh_header.num_strip_groups {
-                    // info!(
-                    //     "Loading body part {}, model {}, lod {}, mesh {}, strip group {}",
-                    //     body_part_num, model_num, lod_num, mesh_num, strip_group_num
-                    // );
-
-                    // let strip_group_start_index = mesh_start_index
-                    //     + mesh_header.strip_group_header_offset as usize
-                    //     + (strip_group_num as usize
-                    //         * mem::size_of::<VTXFileStripGroupHeader>())
-                    //         as usize;
-                    // let strip_header: &VTXFileStripGroupHeader = copy_c_struct!(
-                    //     VTXFileStripGroupHeader,
-                    //     strip_group_start_index,
-                    //     strip_group_num,
-                    //     vtx_data_bytes
-                    // );
-
-                    // strip_groups.push(StripGroup {
-                    //     header: *strip_header,
-                    // });
-                }
-
-                meshes.push(Mesh {
-                    header: *mesh_header,
-                    strip_groups,
-                });
-            }
+        for lod_num in 0..model_header.num_lods {
+            let meshes: Vec<Mesh> = self.read_meshes(
+                &lod_headers[lod_num as usize],
+                lod_start_indices[lod_num as usize],
+                body_part_num,
+                model_num,
+                lod_num as usize,
+                vtx_data_bytes,
+            )?;
 
             lods.push(LOD {
-                header: *lod_header,
+                header: lod_headers[lod_num as usize],
                 meshes,
             });
         }
