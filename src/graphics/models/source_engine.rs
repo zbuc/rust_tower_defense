@@ -31,7 +31,7 @@ pub struct SourceModelVector(f32, f32, f32);
 pub struct SourceModelVector2D(f32, f32);
 
 // @chris see here: https://stackoverflow.com/a/25411013/3317191
-// tl;dr instantiate the struct you want to fill with zeroed or uninitialised memory, then unsafely access its memory as a mutable slice and read into that. (edited) 
+// tl;dr instantiate the struct you want to fill with zeroed or uninitialised memory, then unsafely access its memory as a mutable slice and read into that. (edited)
 // Or just implement a parser for the serialised struct using byteorder and call it a day.
 // you can also first read the data into any kind of `AsRef<[u8]>` container and then use `str::from_utf8` to obtain a `str` of its contents
 // or if you read into a `Vec` you can do a zero copy conversion to a `String` with `String::from_utf8()`
@@ -52,6 +52,26 @@ macro_rules! copy_c_struct {
         let struct_end_index = struct_start_index + mem::size_of::<$type>();
 
         let struct_data_ptr: *const u8 = $data_ptr[struct_start_index..struct_end_index].as_ptr();
+        let struct_ptr: *const $type = struct_data_ptr as *const _;
+        let struct_from_c: &$type = unsafe { &*struct_ptr };
+
+        struct_from_c
+    }};
+}
+
+/// copies the next size_of::<type> bytes from the current position of the
+/// file handle into an instance of type. should maybe be a trait instead.
+#[macro_export]
+macro_rules! copy_c_struct_from_file {
+    ($type:ty,$file_handle:ident) => {{
+        let mut buf: [u8; mem::size_of::<$type>()] = [0; mem::size_of::<$type>()];
+
+        match $file_handle.read_exact(&mut buf) {
+            Err(_e) => return Err(VTXDeserializeError::new("shit")),
+            Ok(_) => (),
+        };
+
+        let struct_data_ptr: *const u8 = buf.as_ptr();
         let struct_ptr: *const $type = struct_data_ptr as *const _;
         let struct_from_c: &$type = unsafe { &*struct_ptr };
 

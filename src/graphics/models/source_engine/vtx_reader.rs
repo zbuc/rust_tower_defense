@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::Read;
 use std::mem;
 
-use crate::copy_c_struct;
+use crate::{copy_c_struct,copy_c_struct_from_file};
 
 // https://developer.valvesoftware.com/wiki/Model
 
@@ -193,12 +193,23 @@ pub struct VTXFileStripHeader {
 
 struct VTXDeserializer {
     path: String,
+    file_handle: std::fs::File,
+    file_index: usize,
 }
 
 // https://github.com/ValveSoftware/source-sdk-2013/blob/0d8dceea4310fde5706b3ce1c70609d72a38efdf/mp/src/utils/vrad/vradstaticprops.cpp#L1224
 impl VTXDeserializer {
-    pub fn new(path: String) -> Self {
-        VTXDeserializer { path }
+    pub fn new(path: String) -> Result<Self, VTXDeserializeError> {
+        let mut vtx_file = match File::open(&path) {
+            Ok(f) => f,
+            Err(_e) => {
+                return Err(VTXDeserializeError::new(
+                    "Unable to open vtx file from disk",
+                ));
+            }
+        };
+
+        Ok(VTXDeserializer { path, file_index: 0, file_handle: vtx_file })
     }
 
     pub fn read_vertices(&self, strip_group_header: &VTXFileStripGroupHeader, strip_group_start_index: usize, vtx_data_bytes: &[u8]) -> Result<Vec<VTXFileVertex>, VTXDeserializeError> {
@@ -586,22 +597,8 @@ impl VTXDeserializer {
     }
 
     pub fn deserialize(&mut self) -> Result<VTXFile, VTXDeserializeError> {
-        let mut vtx_file = match File::open(&self.path) {
-            Ok(f) => f,
-            Err(_e) => {
-                return Err(VTXDeserializeError::new(
-                    "Unable to open vtx file from disk",
-                ));
-            }
-        };
-
-        let mut vtx_data_bytes = Vec::<u8>::new();
-        match vtx_file.read_to_end(&mut vtx_data_bytes) {
-            Ok(b) => b,
-            Err(_e) => return Err(VTXDeserializeError::new("Error reading vtx file contents")),
-        };
-
-        let header: &VTXFileHeader = copy_c_struct!(VTXFileHeader, 0, 0, vtx_data_bytes);
+        let mut fh = &self.file_handle;
+        let header: &VTXFileHeader = copy_c_struct_from_file!(VTXFileHeader, fh);
 
         // The first 4 bytes of a VTX file should be a version, 7 (OPTIMIZED_MODEL_FILE_VERSION)
         if header.version != OPTIMIZED_MODEL_FILE_VERSION {
@@ -610,8 +607,9 @@ impl VTXDeserializer {
             ));
         }
 
-        // let mut bodyparts: Vec<BodyPart> = Vec::new();
-        let mut bodyparts: Vec<BodyPart> = self.read_bodyparts(header, &vtx_data_bytes)?;
+        let mut bodyparts: Vec<BodyPart> = Vec::new();
+        warn!("disabled loading bodyparts for now");
+        // let mut bodyparts: Vec<BodyPart> = self.read_bodyparts(header, &vtx_data_bytes)?;
 
         // XXX there *really* should be actual checked deserialization here because this will produce unexpected behavior
         // for improperly formatted models -- but I'm *personally* only ever going to feed it good models ;)
@@ -631,7 +629,7 @@ impl VTXDeserializer {
 /// If there is any issue loading the VTX file from disk, an Err variant will
 /// be returned.
 pub fn read_vtx_file_from_disk(path: &str) -> Result<VTXFile, VTXDeserializeError> {
-    let mut deserializer = VTXDeserializer::new(path.to_string());
+    let mut deserializer = VTXDeserializer::new(path.to_string())?;
 
     deserializer.deserialize()
 }
