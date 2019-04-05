@@ -157,6 +157,20 @@ fn load_vtx() {
     );
 
     assert_eq!(
+        vtxfile.bodyparts[0].models[0].lods[0].meshes[0].strip_groups[0]
+            .strips[0]
+            .header.num_bone_state_changes,
+            420
+    );
+
+    assert_eq!(
+        vtxfile.bodyparts[0].models[0].lods[0].meshes[0].strip_groups[0]
+            .strips[0]
+            .header.bone_state_change_offset,
+            420
+    );
+
+    assert_eq!(
         vtxfile.bodyparts[0].models[0].lods[0].meshes[1]
             .header
             .flags,

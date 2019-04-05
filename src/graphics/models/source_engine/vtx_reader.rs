@@ -279,6 +279,15 @@ impl VTXDeserializer {
                 strip_num,
                 vtx_data_bytes
             );
+
+            // If Me.theStripGroupAndStripUseExtraFields Then
+            // 	aStrip.unknownBytes01 = Me.theInputFileReader.ReadInt32()
+            // 	aStrip.unknownBytes02 = Me.theInputFileReader.ReadInt32()
+            // End I
+
+            // Me.ReadSourceVtxBoneStateChanges(stripInputFileStreamPosition, aStrip)
+
+            //bone_state_change_offset
             
             strips.push(Strip {
                 header: *strip,
