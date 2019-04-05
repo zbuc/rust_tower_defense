@@ -116,6 +116,9 @@ pub struct VTXFileStripGroupHeader {
 #[derive(Clone)]
 pub struct StripGroup {
     pub header: VTXFileStripGroupHeader,
+    pub vertices: Vec<VTXFileVertex>,
+    pub indices: Vec<VTXFileIndex>,
+    pub strips: Vec<Strip>,
 }
 
 #[derive(Clone)]
@@ -148,6 +151,46 @@ pub struct VTXFile {
     pub bodyparts: Vec<BodyPart>,
 }
 
+#[derive(Copy, Clone)]
+pub struct VTXFileVertex {
+	// these index into the mesh's vert[origMeshVertID]'s bones
+	pub bone_weight_index: [u8; 3],
+	pub num_bones: u8,
+
+	pub orig_mesh_vert_id: u16,
+
+	// for sw skinned verts, these are indices into the global list of bones
+	// for hw skinned verts, these are hardware bone indices
+	pub bone_id: [u8; 3],
+}
+
+#[derive(Copy, Clone)]
+pub struct VTXFileIndex {
+    pub position: u16,
+}
+
+#[derive(Copy, Clone)]
+pub struct Strip {
+    pub header: VTXFileStripHeader,
+}
+
+#[derive(Copy, Clone)]
+pub struct VTXFileStripHeader {
+    // A strip is a piece of a stripgroup which is divided by bones 
+	pub num_indices: i32,
+	pub index_offset: i32,
+
+	pub num_verts: i32,
+	pub vert_offset: i32,
+
+	pub num_bones: i16,
+
+	pub flags: u8,
+
+	pub num_bone_state_changes: i32,
+	pub bone_state_change_offset: i32,
+}
+
 struct VTXDeserializer {
     path: String,
 }
@@ -158,42 +201,201 @@ impl VTXDeserializer {
         VTXDeserializer { path }
     }
 
-    pub fn read_strip_groups(&self, vtx_data_bytes: &[u8],) -> Result<Vec<StripGroup>, VTXDeserializeError> {
+    pub fn read_vertices(&self, strip_group_header: &VTXFileStripGroupHeader, strip_group_start_index: usize, vtx_data_bytes: &[u8]) -> Result<Vec<VTXFileVertex>, VTXDeserializeError> {
+        let mut vertices: Vec<VTXFileVertex> = Vec::new();
+
+        for vertex_num in 0..strip_group_header.num_verts {
+            info!(
+                "Loading vertex {}",
+                vertex_num
+            );
+
+            let vertex_start_index = strip_group_start_index
+                + strip_group_header.vert_offset as usize
+                + (vertex_num as usize * mem::size_of::<VTXFileVertex>()) as usize;
+            let vertex: &VTXFileVertex = copy_c_struct!(
+                VTXFileVertex,
+                vertex_start_index,
+                vertex_num,
+                vtx_data_bytes
+            );
+
+            vertices.push(*vertex);
+        }
+
+        Ok(vertices)
+    }
+
+    pub fn read_indices(
+        &self,
+        strip_group_header: &VTXFileStripGroupHeader,
+        strip_group_start_index: usize,
+        vtx_data_bytes: &[u8],
+    ) -> Result<Vec<VTXFileIndex>, VTXDeserializeError> {
+        let mut indices: Vec<VTXFileIndex> = Vec::new();
+
+        for index_num in 0..strip_group_header.num_indices {
+            info!(
+                "Loading index {}",
+                index_num
+            );
+
+            let index_start_index = strip_group_start_index
+                + strip_group_header.index_offset as usize
+                + (index_num as usize * mem::size_of::<VTXFileIndex>()) as usize;
+            let index: &VTXFileIndex= copy_c_struct!(
+                VTXFileIndex,
+                index_start_index,
+                index_num,
+                vtx_data_bytes
+            );
+            
+            indices.push(*index);
+        }
+
+        Ok(indices)
+    }
+
+    pub fn read_strips(
+        &self,
+        strip_group_header: &VTXFileStripGroupHeader,
+        strip_group_start_index: usize,
+        vtx_data_bytes: &[u8],
+    ) -> Result<Vec<Strip>, VTXDeserializeError> {
+        let mut strips: Vec<Strip> = Vec::new();
+
+        for strip_num in 0..strip_group_header.num_strips {
+            info!(
+                "Loading strip {}",
+                strip_num
+            );
+
+            let strip_start_index = strip_group_start_index
+                + strip_group_header.strip_offset as usize
+                + (strip_num as usize * mem::size_of::<VTXFileStripHeader>()) as usize;
+            let strip: &VTXFileStripHeader = copy_c_struct!(
+                VTXFileStripHeader,
+                strip_start_index,
+                strip_num,
+                vtx_data_bytes
+            );
+            
+            strips.push(Strip {
+                header: *strip,
+            });
+        }
+
+        Ok(strips)
+    }
+    pub fn read_strip_groups(
+        &self,
+        mesh_header: &VTXFileMeshHeader,
+        mesh_start_index: usize,
+        vtx_data_bytes: &[u8],
+    ) -> Result<Vec<StripGroup>, VTXDeserializeError> {
         let mut strip_groups: Vec<StripGroup> = Vec::new();
 
-            // for strip_group_num in 0..mesh_header.num_strip_groups {
-                // info!(
-                //     "Loading body part {}, model {}, lod {}, mesh {}, strip group {}",
-                //     body_part_num, model_num, lod_num, mesh_num, strip_group_num
-                // );
+        for strip_group_num in 0..mesh_header.num_strip_groups {
+            info!(
+                "Loading strip group {}",
+                strip_group_num
+            );
 
-                // let strip_group_start_index = mesh_start_index
-                //     + mesh_header.strip_group_header_offset as usize
-                //     + (strip_group_num as usize
-                //         * mem::size_of::<VTXFileStripGroupHeader>())
-                //         as usize;
-                // let strip_header: &VTXFileStripGroupHeader = copy_c_struct!(
-                //     VTXFileStripGroupHeader,
-                //     strip_group_start_index,
-                //     strip_group_num,
-                //     vtx_data_bytes
-                // );
+            let strip_group_start_index = mesh_start_index
+                + mesh_header.strip_group_header_offset as usize
+                + (strip_group_num as usize * mem::size_of::<VTXFileStripGroupHeader>()) as usize;
+            let strip_group_header: &VTXFileStripGroupHeader = copy_c_struct!(
+                VTXFileStripGroupHeader,
+                strip_group_start_index,
+                strip_group_num,
+                vtx_data_bytes
+            );
 
-                // strip_groups.push(StripGroup {
-                //     header: *strip_header,
-                // });
-            // }
+            // from the Crowbar source, it looks like there's something extra that
+            // can appear here
+            //     If Me.theStripGroupAndStripUseExtraFields Then
+            // 	aStripGroup.topologyIndexCount = Me.theInputFileReader.ReadInt32()
+            // 	aStripGroup.topologyIndexOffset = Me.theInputFileReader.ReadInt32()
+            // End If
+ 
+            // snapshot file read position
 
+            // vertex data immediately follows the strip header
+            let mut vertices: Vec<VTXFileVertex> = Vec::new();
+            if strip_group_header.num_verts > 0 && strip_group_header.vert_offset != 0 {
+                // read vertices
+                vertices = self.read_vertices(&strip_group_header, strip_group_start_index, &vtx_data_bytes)?;
+            }
+
+            let mut indices: Vec<VTXFileIndex> = Vec::new();
+            if strip_group_header.num_indices > 0 && strip_group_header.index_offset != 0 {
+                // read the indices
+                indices = self.read_indices(&strip_group_header, strip_group_start_index, &vtx_data_bytes)?;
+            }
+
+            let mut strips: Vec<Strip> = Vec::new();
+            if strip_group_header.num_strips > 0 && strip_group_header.strip_offset != 0 {
+                // read the strips
+                strips = self.read_strips(&strip_group_header, strip_group_start_index, &vtx_data_bytes)?;
+            }
+
+            // looks like extra fields here again from the crowbar source
+            // If Me.theStripGroupAndStripUseExtraFields Then
+            //     If aStripGroup.topologyIndexCount > 0 AndAlso aStripGroup.topologyIndexOffset <> 0 Then
+            //         Me.ReadSourceVtxTopologyIndexes(stripGroupInputFileStreamPosition, aStripGroup)
+            //     End If
+            // End If
+
+            // then some comment and commented out code in Crowbar. wonder what flex vertices are
+            // 'TODO: Set whether stripgroup has flex vertexes in it or not for $lod facial and nofacial options.
+            // If (aStripGroup.flags And SourceVtxStripGroup.SourceStripGroupFlexed) > 0 OrElse (aStripGroup.flags And SourceVtxStripGroup.SourceStripGroupDeltaFixed) > 0 Then
+            //     aModelLod.theVtxModelLodUsesFacial = True
+            //     '------
+            //     'Dim aVtxVertex As SourceVtxVertex
+            //     'For Each aVtxVertexIndex As UShort In aStripGroup.theVtxIndexes
+            //     '	aVtxVertex = aStripGroup.theVtxVertexes(aVtxVertexIndex)
+
+            //     '	' for (i = 0; i < pStudioMesh->numflexes; i++)
+            //     '	' for (j = 0; j < pflex[i].numverts; j++)
+            //     '	'The meshflexes are found in the MDL file > bodypart > model > mesh.theFlexes
+            //     '	For Each meshFlex As SourceMdlFlex In meshflexes
+
+            //     '	Next
+            //     'Next
+            //     ''Dim debug As Integer = 4242
+            // End If
+
+            // seek back to saved position
+
+            strip_groups.push(StripGroup {
+                header: *strip_group_header,
+                indices,
+                strips,
+                vertices,
+            });
+        }
 
         Ok(strip_groups)
     }
 
-    pub fn read_meshes(&self, lod_header: &VTXFileModelLODHeader, lod_start_index: usize, body_part_num: usize, model_num: usize, lod_num: usize, vtx_data_bytes: &[u8],) -> Result<Vec<Mesh>, VTXDeserializeError> {
+    pub fn read_meshes(
+        &self,
+        lod_header: &VTXFileModelLODHeader,
+        lod_start_index: usize,
+        body_part_num: usize,
+        model_num: usize,
+        lod_num: usize,
+        vtx_data_bytes: &[u8],
+    ) -> Result<Vec<Mesh>, VTXDeserializeError> {
         let mut mesh_headers: Vec<VTXFileMeshHeader> = Vec::new();
         let mut mesh_start_indices: Vec<usize> = Vec::new();
 
+        let mut meshes: Vec<Mesh> = Vec::new();
+
         info!("num meshes {}", lod_header.num_meshes);
-        for mesh_num in 0..lod_header.num_meshes {
+        // for mesh_num in 0..lod_header.num_meshes {
+        warn!("cheating and only loading 1 mesh");
+        for mesh_num in 0..1 {
             info!(
                 "Loading body part {}, model {}, lod {}, mesh {}",
                 body_part_num, model_num, lod_num, mesh_num
@@ -209,21 +411,21 @@ impl VTXDeserializer {
                 mesh_num,
                 vtx_data_bytes
             );
+
             mesh_headers.push(*mesh_header);
             mesh_start_indices.push(mesh_start_index);
-        }
 
-        let mut meshes: Vec<Mesh> = Vec::new();
-
-        for mesh_num in 0..lod_header.num_meshes {
-            let strip_groups: Vec<StripGroup> = self.read_strip_groups(vtx_data_bytes)?;
+            let mut strip_groups: Vec<StripGroup> = Vec::new();
+            if mesh_header.num_strip_groups > 0 && mesh_header.strip_group_header_offset != 0 {
+                strip_groups = self.read_strip_groups(mesh_header, mesh_start_index, vtx_data_bytes)?;
+            }
 
             meshes.push(Mesh {
                 header: mesh_headers[mesh_num as usize],
                 strip_groups,
             });
         }
-        
+
         Ok(meshes)
     }
 
@@ -261,7 +463,14 @@ impl VTXDeserializer {
         let mut lods: Vec<LOD> = Vec::new();
 
         for lod_num in 0..model_header.num_lods {
-            let meshes: Vec<Mesh> = self.read_meshes(&lod_headers[lod_num as usize], lod_start_indices[lod_num as usize], body_part_num, model_num, lod_num as usize, vtx_data_bytes)?;
+            let meshes: Vec<Mesh> = self.read_meshes(
+                &lod_headers[lod_num as usize],
+                lod_start_indices[lod_num as usize],
+                body_part_num,
+                model_num,
+                lod_num as usize,
+                vtx_data_bytes,
+            )?;
 
             lods.push(LOD {
                 header: lod_headers[lod_num as usize],
